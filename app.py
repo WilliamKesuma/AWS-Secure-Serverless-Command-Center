@@ -11,30 +11,40 @@ app = cdk.App()
 iam_stack = IamStack(app, "IamStack")
 db_stack = DynamodbStack(app, "DynamodbStack")
 
-# Change the OpenSearchStack instantiation to this:
+# 2. OpenSearch Layer
 os_stack = OpenSearchStack(
-    app, 
+    app,
     "OpenSearchStack",
-    lambda_role_arn=iam_stack.lambda_role.role_arn # Pass the ARN string
+    lambda_role_arn=iam_stack.lambda_role.role_arn
 )
 
 # 3. Compute Layer
-# Pass tables, roles, and the new OpenSearch endpoint
 lambda_stack = LambdaStack(
     app,
     "LambdaStack",
     user_table=db_stack.user_table,
     product_table=db_stack.product_table,
     iam_role=iam_stack.lambda_role,
-    os_endpoint=os_stack.domain_endpoint # Pass the endpoint for the Lambda env var
+    os_endpoint=os_stack.domain_endpoint
 )
 
 # 4. Monitoring & Alerting Layer
-# Pass the Lambda function so we can attach CloudWatch Alarms to it
+# Now passing all Lambda functions so SnsStack can attach metric filters to their log groups
 SnsStack(
-    app, 
+    app,
     "SnsStack",
-    target_lambda=lambda_stack.main_fn
+    lambda_functions=[
+        lambda_stack.main_fn,           
+        lambda_stack.get_users_fn,
+        lambda_stack.get_user_by_id_fn,
+        lambda_stack.update_user_fn,
+        lambda_stack.delete_user_fn,
+        lambda_stack.create_product_fn,
+        lambda_stack.get_product_fn,
+        lambda_stack.get_product_by_id_fn,
+        lambda_stack.update_product_fn,
+        lambda_stack.delete_product_fn,
+    ]
 )
 
 app.synth()

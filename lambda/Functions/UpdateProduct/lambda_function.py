@@ -1,23 +1,59 @@
-import json, boto3, os
+import json
+import boto3
+import os
 
-table = boto3.resource("dynamodb").Table(os.environ["PRODUCT_TABLE"])
+# Import shared logic from your Lambda Layer
+from utils import logger, tracer, create_response, handle_exception
 
+# Initialize DynamoDB
+dynamodb = boto3.resource("dynamodb")
+table = dynamodb.Table(os.environ.get("PRODUCT_TABLE"))
+
+
+@logger.inject_lambda_context(log_event=True)
+@tracer.capture_lambda_handler
 def lambda_handler(event, context):
     try:
+        # 1. Get product ID from path parameters
         product_id = event.get("pathParameters", {}).get("id")
         if not product_id:
-            return {"statusCode": 400, "body": json.dumps({"message": "Missing product id"})}
-        body = json.loads(event["body"])
-        table.update_item(
-            Key={"productid": product_id},
-            UpdateExpression="SET #n = :name, price = :price",
-            ExpressionAttributeNames={"#n": "name"},
-            ExpressionAttributeValues={":name": body["name"], ":price": body["price"]},
-        )
-        return {"statusCode": 200, "body": json.dumps({"message": "Product updated"})}
-    except json.JSONDecodeError:
-        return {"statusCode": 400, "body": json.dumps({"message": "Invalid JSON body"})}
-    except KeyError as e:
-        return {"statusCode": 400, "body": json.dumps({"message": f"Missing field: {str(e)}"})}
-    except Exception as e:
-        return {"statusCode": 500, "body": json.dumps({"message": str(e)})}
+            logger.warning("Missing product id in path parameters")
+            return create_response(400, "Missing product id")
+
+        # 2. Parse request body
+        try:
+            body = json.loads(event.get("body", "{}"))
+        except (json.JSONDecodeError, TypeError):
+            logger.warning("Request body is not valid JSON")
+            return create_response(400, "Invalid JSON format in request body")
+
+        name = body.get("name")
+        price = body.get("price")
+
+        if not name or price is None:
+            logger.warning("Validation failed: name or price missing")
+            return create_response(400, "Missing required fields: 'name' and 'price'")
+
+        # 3. Update in DynamoDB (Traced Method)
+        update_product_in_db(product_id, name, price)
+        logger.info(f"Product {product_id} updated successfully")
+
+        # 4. Return Success
+        return create_response(200, "Product updated successfully")
+
+    except Exception as ex:
+        return handle_exception(ex, context, event)
+
+
+@tracer.capture_method
+def update_product_in_db(product_id, name, price):
+    """
+    Traced method - if DynamoDB is slow or fails,
+    you will see it clearly in the X-Ray trace map.
+    """
+    table.update_item(
+        Key={"productid": product_id},
+        UpdateExpression="SET #n = :name, price = :price",
+        ExpressionAttributeNames={"#n": "name"},
+        ExpressionAttributeValues={":name": name, ":price": price},
+    )

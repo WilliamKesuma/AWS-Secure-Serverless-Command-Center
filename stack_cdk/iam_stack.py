@@ -14,17 +14,26 @@ class IamStack(Stack):
         self.lambda_role = iam.Role(
             self,
             "LambdaCrudRole",
-            assumed_by=iam.ServicePrincipal("lambda.amazonaws.com")
+            assumed_by=iam.ServicePrincipal("lambda.amazonaws.com"),
+            description="Role for William_Phase2 Lambda functions with X-Ray and DynamoDB access"
         )
 
-        # Basic logging permissions
+        # 1. Basic logging permissions (Allows writing to CloudWatch)
         self.lambda_role.add_managed_policy(
             iam.ManagedPolicy.from_aws_managed_policy_name(
                 "service-role/AWSLambdaBasicExecutionRole"
             )
         )
 
-        # FULL DynamoDB access (as required)
+        # 2. X-Ray Tracing permissions 
+        # This fixes the "Potential missing permissions" error and allows tracer.put_annotation to work
+        self.lambda_role.add_managed_policy(
+            iam.ManagedPolicy.from_aws_managed_policy_name(
+                "AWSXRayDaemonWriteAccess"
+            )
+        )
+
+        # 3. FULL DynamoDB access
         self.lambda_role.add_managed_policy(
             iam.ManagedPolicy.from_aws_managed_policy_name(
                 "AmazonDynamoDBFullAccess"

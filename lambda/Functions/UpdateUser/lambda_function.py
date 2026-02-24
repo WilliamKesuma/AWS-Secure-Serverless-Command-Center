@@ -1,26 +1,59 @@
-import json, boto3, os
+import json
+import boto3
+import os
 
-table = boto3.resource("dynamodb").Table(os.environ["USER_TABLE"])
+# Import shared logic from your Lambda Layer
+from utils import logger, tracer, create_response, handle_exception
 
+# Initialize DynamoDB
+dynamodb = boto3.resource("dynamodb")
+table = dynamodb.Table(os.environ.get("USER_TABLE"))
+
+
+@logger.inject_lambda_context(log_event=True)
+@tracer.capture_lambda_handler
 def lambda_handler(event, context):
     try:
+        # 1. Get user ID from path parameters
         user_id = event.get("pathParameters", {}).get("id")
         if not user_id:
-            return {"statusCode": 400, "body": json.dumps({"message": "Missing user id"})}
-        body = json.loads(event["body"])
-        table.update_item(
-            Key={"userid": user_id},
-            UpdateExpression="SET #n=:n, email=:e",
-            ExpressionAttributeNames={"#n": "name"},
-            ExpressionAttributeValues={
-                ":n": body.get("name"),
-                ":e": body.get("email")
-            }
-        )
-        return {"statusCode": 200, "body": json.dumps({"message": "User updated"})}
-    except json.JSONDecodeError:
-        return {"statusCode": 400, "body": json.dumps({"message": "Invalid JSON body"})}
-    except KeyError as e:
-        return {"statusCode": 400, "body": json.dumps({"message": f"Missing field: {str(e)}"})}
-    except Exception as e:
-        return {"statusCode": 500, "body": json.dumps({"message": str(e)})}
+            logger.warning("Missing user id in path parameters")
+            return create_response(400, "Missing user id")
+
+        # 2. Parse request body
+        try:
+            body = json.loads(event.get("body", "{}"))
+        except (json.JSONDecodeError, TypeError):
+            logger.warning("Request body is not valid JSON")
+            return create_response(400, "Invalid JSON format in request body")
+
+        name = body.get("name")
+        email = body.get("email")
+
+        if not name or not email:
+            logger.warning("Validation failed: name or email missing")
+            return create_response(400, "Missing required fields: 'name' and 'email'")
+
+        # 3. Update in DynamoDB (Traced Method)
+        update_user_in_db(user_id, name, email)
+        logger.info(f"User {user_id} updated successfully")
+
+        # 4. Return Success
+        return create_response(200, "User updated successfully")
+
+    except Exception as ex:
+        return handle_exception(ex, context, event)
+
+
+@tracer.capture_method
+def update_user_in_db(user_id, name, email):
+    """
+    Traced method - if DynamoDB is slow or fails,
+    you will see it clearly in the X-Ray trace map.
+    """
+    table.update_item(
+        Key={"userid": user_id},
+        UpdateExpression="SET #n = :name, email = :email",
+        ExpressionAttributeNames={"#n": "name"},
+        ExpressionAttributeValues={":name": name, ":email": email},
+    )

@@ -2,31 +2,46 @@ import json
 import boto3
 import os
 
+# Import shared logic from your Lambda Layer
+from utils import logger, tracer, create_response, handle_exception
+
+# Initialize DynamoDB
+dynamodb = boto3.resource("dynamodb")
+table = dynamodb.Table(os.environ.get("USER_TABLE"))
+
+
+@logger.inject_lambda_context(log_event=True)
+@tracer.capture_lambda_handler
 def lambda_handler(event, context):
-    # Initialize inside handler to ensure the mock is captured
-    region = os.environ.get("AWS_REGION", "ap-southeast-1")
-    table_name = os.environ.get("USER_TABLE", "User")
-    dynamodb = boto3.resource("dynamodb", region_name=region)
-    table = dynamodb.Table(table_name)
-
     try:
-        # Check for pathParameters existence
-        if not event or "pathParameters" not in event or event["pathParameters"] is None:
-            return {"statusCode": 400, "body": json.dumps({"message": "Missing path parameters"})}
+        # 1. Get user ID from path parameters
+        path_params = event.get("pathParameters")
+        if not path_params or "id" not in path_params:
+            logger.warning("Missing user id in path parameters")
+            return create_response(400, "Missing user id")
 
-        user_id = event["pathParameters"].get("id")
-        if not user_id:
-            return {"statusCode": 400, "body": json.dumps({"message": "Missing user id"})}
+        user_id = path_params["id"]
 
-        # .get_item returns a DICT (Fixes the TypeError)
-        data = table.get_item(Key={"userid": user_id})
-        
-        if "Item" not in data:
-            return {"statusCode": 404, "body": json.dumps({"message": "User not found"})}
+        # 2. Get user from DynamoDB (Traced Method)
+        item = get_user_from_db(user_id)
+        if not item:
+            logger.warning(f"User {user_id} not found")
+            return create_response(404, "User not found")
 
-        return {
-            "statusCode": 200, 
-            "body": json.dumps(data["Item"], default=str)
-        }
-    except Exception as e:
-        return {"statusCode": 500, "body": json.dumps({"message": str(e)})}
+        logger.info(f"User {user_id} retrieved successfully")
+
+        # 3. Return Success
+        return create_response(200, "User retrieved successfully", item)
+
+    except Exception as ex:
+        return handle_exception(ex, context, event)
+
+
+@tracer.capture_method
+def get_user_from_db(user_id):
+    """
+    Traced method - if DynamoDB is slow or fails,
+    you will see it clearly in the X-Ray trace map.
+    """
+    response = table.get_item(Key={"userid": user_id})
+    return response.get("Item")
