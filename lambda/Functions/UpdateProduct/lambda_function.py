@@ -1,6 +1,7 @@
 import json
 import boto3
 import os
+from decimal import Decimal
 
 # Import shared logic from your Lambda Layer
 from utils import logger, tracer, create_response, handle_exception
@@ -34,11 +35,18 @@ def lambda_handler(event, context):
             logger.warning("Validation failed: name or price missing")
             return create_response(400, "Missing required fields: 'name' and 'price'")
 
-        # 3. Update in DynamoDB (Traced Method)
+        # 3. Validate price is a number
+        try:
+            price = Decimal(str(price))
+        except Exception:
+            logger.warning("Validation failed: price must be a number")
+            return create_response(400, "Price must be a valid number")
+
+        # 4. Update in DynamoDB (Traced Method)
         update_product_in_db(product_id, name, price)
         logger.info(f"Product {product_id} updated successfully")
 
-        # 4. Return Success
+        # 5. Return Success
         return create_response(200, "Product updated successfully")
 
     except Exception as ex:
@@ -50,6 +58,7 @@ def update_product_in_db(product_id, name, price):
     """
     Traced method - if DynamoDB is slow or fails,
     you will see it clearly in the X-Ray trace map.
+    price must be Decimal, not float, for DynamoDB.
     """
     table.update_item(
         Key={"productid": product_id},

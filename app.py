@@ -29,12 +29,11 @@ lambda_stack = LambdaStack(
 )
 
 # 4. Monitoring & Alerting Layer
-# Now passing all Lambda functions so SnsStack can attach metric filters to their log groups
 SnsStack(
     app,
     "SnsStack",
     lambda_functions=[
-        lambda_stack.main_fn,           
+        lambda_stack.main_fn,
         lambda_stack.get_users_fn,
         lambda_stack.get_user_by_id_fn,
         lambda_stack.update_user_fn,
@@ -44,6 +43,8 @@ SnsStack(
         lambda_stack.get_product_by_id_fn,
         lambda_stack.update_product_fn,
         lambda_stack.delete_product_fn,
+        lambda_stack.search_user_fn,
+        lambda_stack.search_product_fn,
     ]
 )
 

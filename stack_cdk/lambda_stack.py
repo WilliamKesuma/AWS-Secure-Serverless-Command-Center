@@ -1,17 +1,19 @@
 from aws_cdk import (
     Stack,
+    Duration,
     aws_lambda as _lambda,
     aws_apigateway as apigw
 )
 from constructs import Construct
 
+
 class LambdaStack(Stack):
 
     def __init__(self, scope: Construct, construct_id: str,
-                 user_table, product_table, iam_role, 
+                 user_table, product_table, iam_role,
                  os_endpoint: str,
                  **kwargs):
-        
+
         super().__init__(scope, construct_id, **kwargs)
 
         os_env = {"OS_ENDPOINT": os_endpoint}
@@ -34,9 +36,10 @@ class LambdaStack(Stack):
             role=iam_role,
             layers=[self.utils_layer],
             tracing=_lambda.Tracing.ACTIVE,
+            timeout=Duration.seconds(10),
             environment={
                 "USER_TABLE": user_table.table_name,
-                **os_env 
+                **os_env
             }
         )
 
@@ -92,6 +95,7 @@ class LambdaStack(Stack):
             role=iam_role,
             layers=[self.utils_layer],
             tracing=_lambda.Tracing.ACTIVE,
+            timeout=Duration.seconds(10),
             environment={"PRODUCT_TABLE": product_table.table_name, **os_env}
         )
 
@@ -139,6 +143,30 @@ class LambdaStack(Stack):
             environment={"PRODUCT_TABLE": product_table.table_name, **os_env}
         )
 
+        self.search_user_fn = _lambda.Function(
+            self, "SearchUserFn",
+            runtime=_lambda.Runtime.PYTHON_3_12,
+            handler="lambda_function.lambda_handler",
+            code=_lambda.Code.from_asset("lambda/Functions/Search User"),
+            role=iam_role,
+            layers=[self.utils_layer],
+            tracing=_lambda.Tracing.ACTIVE,
+            timeout=Duration.seconds(10),
+            environment={"USER_TABLE": user_table.table_name, **os_env}
+        )
+
+        self.search_product_fn = _lambda.Function(
+            self, "SearchProductFn",
+            runtime=_lambda.Runtime.PYTHON_3_12,
+            handler="lambda_function.lambda_handler",
+            code=_lambda.Code.from_asset("lambda/Functions/Search Product"),
+            role=iam_role,
+            layers=[self.utils_layer],
+            tracing=_lambda.Tracing.ACTIVE,
+            timeout=Duration.seconds(10),
+            environment={"PRODUCT_TABLE": product_table.table_name, **os_env}
+        )
+
         # ---------- API GATEWAY ----------
         api = apigw.RestApi(
             self,
@@ -168,3 +196,11 @@ class LambdaStack(Stack):
         product_id.add_method("GET",    apigw.LambdaIntegration(self.get_product_by_id_fn))
         product_id.add_method("PUT",    apigw.LambdaIntegration(self.update_product_fn))
         product_id.add_method("DELETE", apigw.LambdaIntegration(self.delete_product_fn))
+
+        # /search-users
+        search_users = api.root.add_resource("search-users")
+        search_users.add_method("GET", apigw.LambdaIntegration(self.search_user_fn))
+
+        # /search-products
+        search_products = api.root.add_resource("search-products")
+        search_products.add_method("GET", apigw.LambdaIntegration(self.search_product_fn))

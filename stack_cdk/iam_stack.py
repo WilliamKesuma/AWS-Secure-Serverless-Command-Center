@@ -6,7 +6,6 @@ from constructs import Construct
 
 
 class IamStack(Stack):
-
     def __init__(self, scope: Construct, construct_id: str, **kwargs):
         super().__init__(scope, construct_id, **kwargs)
 
@@ -25,17 +24,26 @@ class IamStack(Stack):
             )
         )
 
-        # 2. X-Ray Tracing permissions 
-        # This fixes the "Potential missing permissions" error and allows tracer.put_annotation to work
+        # 2. X-Ray Tracing permissions
         self.lambda_role.add_managed_policy(
             iam.ManagedPolicy.from_aws_managed_policy_name(
                 "AWSXRayDaemonWriteAccess"
             )
         )
 
-        # 3. FULL DynamoDB access
+        # 3. Full DynamoDB access
         self.lambda_role.add_managed_policy(
             iam.ManagedPolicy.from_aws_managed_policy_name(
                 "AmazonDynamoDBFullAccess"
+            )
+        )
+
+        # 4. OpenSearch access - allows Lambda to make signed requests to OpenSearch
+        self.lambda_role.add_to_policy(
+            iam.PolicyStatement(
+                sid="AllowOpenSearchAccess",
+                effect=iam.Effect.ALLOW,
+                actions=["es:*"],
+                resources=["*"]
             )
         )
