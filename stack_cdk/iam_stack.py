@@ -31,19 +31,34 @@ class IamStack(Stack):
             )
         )
 
-        # 3. Full DynamoDB access
+        # 3. Full DynamoDB access (includes Streams read)
         self.lambda_role.add_managed_policy(
             iam.ManagedPolicy.from_aws_managed_policy_name(
                 "AmazonDynamoDBFullAccess"
             )
         )
 
-        # 4. OpenSearch access - allows Lambda to make signed requests to OpenSearch
+        # 4. OpenSearch access
         self.lambda_role.add_to_policy(
             iam.PolicyStatement(
                 sid="AllowOpenSearchAccess",
                 effect=iam.Effect.ALLOW,
                 actions=["es:*"],
+                resources=["*"]
+            )
+        )
+
+        # 5. DynamoDB Streams read permission (required for stream Lambda trigger)
+        self.lambda_role.add_to_policy(
+            iam.PolicyStatement(
+                sid="AllowDynamoDBStreams",
+                effect=iam.Effect.ALLOW,
+                actions=[
+                    "dynamodb:GetShardIterator",
+                    "dynamodb:DescribeStream",
+                    "dynamodb:ListStreams",
+                    "dynamodb:GetRecords"
+                ],
                 resources=["*"]
             )
         )

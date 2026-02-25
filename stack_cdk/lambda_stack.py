@@ -2,6 +2,7 @@ from aws_cdk import (
     Stack,
     Duration,
     aws_lambda as _lambda,
+    aws_lambda_event_sources as lambda_events,
     aws_apigateway as apigw
 )
 from constructs import Construct
@@ -165,6 +166,40 @@ class LambdaStack(Stack):
             tracing=_lambda.Tracing.ACTIVE,
             timeout=Duration.seconds(10),
             environment={"PRODUCT_TABLE": product_table.table_name, **os_env}
+        )
+
+        # ---------- STREAM TO OPENSEARCH LAMBDA ----------
+        self.stream_fn = _lambda.Function(
+            self, "StreamToOpenSearchFn",
+            runtime=_lambda.Runtime.PYTHON_3_12,
+            handler="lambda_function.lambda_handler",
+            code=_lambda.Code.from_asset("lambda/Functions/StreamToOpenSearch"),
+            role=iam_role,
+            layers=[self.utils_layer],
+            tracing=_lambda.Tracing.ACTIVE,
+            timeout=Duration.seconds(60),  # Allow time to process batches
+            environment={**os_env}
+        )
+
+        # Wire DynamoDB Streams to the stream Lambda
+        self.stream_fn.add_event_source(
+            lambda_events.DynamoEventSource(
+                user_table,
+                starting_position=_lambda.StartingPosition.LATEST,
+                batch_size=10,          # Process up to 10 records at a time
+                bisect_batch_on_error=True,   # Split batch on error to isolate bad records
+                retry_attempts=2
+            )
+        )
+
+        self.stream_fn.add_event_source(
+            lambda_events.DynamoEventSource(
+                product_table,
+                starting_position=_lambda.StartingPosition.LATEST,
+                batch_size=10,
+                bisect_batch_on_error=True,
+                retry_attempts=2
+            )
         )
 
         # ---------- API GATEWAY ----------

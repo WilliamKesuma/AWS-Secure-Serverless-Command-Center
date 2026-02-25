@@ -45,6 +45,7 @@ SnsStack(
         lambda_stack.delete_product_fn,
         lambda_stack.search_user_fn,
         lambda_stack.search_product_fn,
+        lambda_stack.stream_fn,
     ]
 )
 
