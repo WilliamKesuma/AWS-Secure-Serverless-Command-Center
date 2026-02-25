@@ -22,28 +22,31 @@ class OpenSearchStack(Stack):
                 data_nodes=1,
                 multi_az_with_standby_enabled=False
             ),
-            # Fine-grained access control with Lambda role as master user
-            # This allows the Lambda role to authenticate as admin to OpenSearch
-            fine_grained_access_control=opensearch.AdvancedSecurityOptions(
-                master_user_arn=lambda_role_arn
-            ),
-            # Required settings when fine-grained access control is enabled
+            # No fine-grained access control - allows SSO role to access Dashboard directly
             encryption_at_rest=opensearch.EncryptionAtRestOptions(enabled=True),
             node_to_node_encryption=True,
             enforce_https=True,
-            # Resource-based access policy that allows the Lambda role to access the domain
+            # Allow both Lambda role and SSO admin role
             access_policies=[
                 iam.PolicyStatement(
                     effect=iam.Effect.ALLOW,
                     principals=[iam.ArnPrincipal(lambda_role_arn)],
                     actions=["es:*"],
-                    resources=["*"]  # Will be scoped to this domain automatically by CDK
+                    resources=["*"]
+                ),
+                iam.PolicyStatement(
+                    effect=iam.Effect.ALLOW,
+                    principals=[iam.ArnPrincipal(
+                        "arn:aws:iam::078646182048:role/aws-reserved/sso.amazonaws.com/ap-southeast-1/AWSReservedSSO_AdministratorAccess_aad2ada13f3171bf"
+                    )],
+                    actions=["es:*"],
+                    resources=["*"]
                 )
             ],
             removal_policy=RemovalPolicy.DESTROY
         )
 
-        # Also grant read/write via CDK helper (adds additional resource policy)
+        # Grant read/write to Lambda role
         self.os_domain.grant_read_write(role_to_grant)
 
     @property

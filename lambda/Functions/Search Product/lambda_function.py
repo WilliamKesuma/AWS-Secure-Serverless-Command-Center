@@ -1,63 +1,90 @@
 import json
 import boto3
 import os
-import uuid
-from decimal import Decimal
+from urllib.request import Request, urlopen
+import ssl
 
 # Import shared logic from your Lambda Layer
 from utils import logger, tracer, create_response, handle_exception
 
-# Global initialization
-dynamodb = boto3.resource("dynamodb")
-table = dynamodb.Table(os.environ.get("PRODUCT_TABLE"))
+OS_ENDPOINT = os.environ.get("OS_ENDPOINT", "")
+OS_INDEX = "products"
+
+
+def signed_request(method, path, body=None):
+    """Make a signed IAM SigV4 request to OpenSearch."""
+    session = boto3.Session()
+    credentials = session.get_credentials().get_frozen_credentials()
+    region = os.environ.get("AWS_REGION", "ap-southeast-1")
+
+    from botocore.auth import SigV4Auth
+    from botocore.awsrequest import AWSRequest
+
+    url = f"https://{OS_ENDPOINT}{path}"
+    encoded_body = json.dumps(body).encode("utf-8") if body else b""
+
+    aws_request = AWSRequest(
+        method=method,
+        url=url,
+        data=encoded_body,
+        headers={"Content-Type": "application/json"}
+    )
+    SigV4Auth(credentials, "es", region).add_auth(aws_request)
+
+    req = Request(url, data=encoded_body, headers=dict(aws_request.headers), method=method)
+    ctx = ssl.create_default_context()
+
+    with urlopen(req, context=ctx, timeout=10) as response:
+        return json.loads(response.read())
 
 
 @logger.inject_lambda_context(log_event=True)
 @tracer.capture_lambda_handler
 def lambda_handler(event, context):
     try:
-        # 1. Parse request body
-        try:
-            body = json.loads(event.get("body", "{}"))
-        except (json.JSONDecodeError, TypeError):
-            logger.warning("Request body is not valid JSON")
-            return create_response(400, "Invalid JSON format in request body")
+        # Get search query - if no q param, return all documents
+        query_params = event.get("queryStringParameters") or {}
+        q = query_params.get("q", "").strip()
 
-        name = body.get("name")
-        price = body.get("price")
+        if q:
+            # Fuzzy search across name field
+            results = search_products(q)
+            logger.info(f"Search for '{q}' returned {len(results)} results")
+        else:
+            # No query - return all documents
+            results = list_all_products()
+            logger.info(f"Listed all products: {len(results)} results")
 
-        # 2. Basic Validation
-        if not name or price is None:
-            logger.warning("Validation failed: name or price missing")
-            return create_response(400, "Missing required fields: 'name' and 'price'")
-
-        try:
-            price = float(price)
-        except (ValueError, TypeError):
-            logger.warning("Validation failed: price must be a number")
-            return create_response(400, "Price must be a valid number")
-
-        # 3. Save to DynamoDB (Traced Method)
-        # OpenSearch indexing is handled automatically via DynamoDB Stream
-        item = save_product_to_db(name, price)
-        logger.info(f"Product {item['productid']} created successfully")
-
-        # 4. Return Success
-        return create_response(201, "Product created successfully", item)
+        return create_response(200, "Search completed successfully", results)
 
     except Exception as ex:
         return handle_exception(ex, context, event)
 
 
 @tracer.capture_method
-def save_product_to_db(name, price):
-    """Traced method - saves product to DynamoDB."""
-    product_id = str(uuid.uuid4())
-    item = {
-        "productid": product_id,
-        "name": name,
-        "price": Decimal(str(price)),
-        "createdAt": str(uuid.uuid4())
+def search_products(q):
+    """Fuzzy multi-match search across name field."""
+    body = {
+        "query": {
+            "multi_match": {
+                "query": q,
+                "fields": ["name"],
+                "fuzziness": "AUTO",
+                "operator": "or"
+            }
+        },
+        "size": 20
     }
-    table.put_item(Item=item)
-    return {**item, "price": float(item["price"])}
+    result = signed_request("GET", f"/{OS_INDEX}/_search", body)
+    return [hit["_source"] for hit in result.get("hits", {}).get("hits", [])]
+
+
+@tracer.capture_method
+def list_all_products():
+    """Return all products from OpenSearch."""
+    body = {
+        "query": {"match_all": {}},
+        "size": 100
+    }
+    result = signed_request("GET", f"/{OS_INDEX}/_search", body)
+    return [hit["_source"] for hit in result.get("hits", {}).get("hits", [])]

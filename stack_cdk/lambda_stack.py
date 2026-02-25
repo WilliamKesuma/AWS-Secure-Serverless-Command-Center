@@ -11,13 +11,18 @@ from constructs import Construct
 class LambdaStack(Stack):
 
     def __init__(self, scope: Construct, construct_id: str,
-                 user_table, product_table, iam_role,
+                 user_table, product_table, order_table, iam_role,
                  os_endpoint: str,
+                 bucket_name: str,
+                 order_queue_url: str,
+                 order_queue,
                  **kwargs):
 
         super().__init__(scope, construct_id, **kwargs)
 
         os_env = {"OS_ENDPOINT": os_endpoint}
+        s3_env = {"BUCKET_NAME": bucket_name}
+        sqs_env = {"ORDER_QUEUE_URL": order_queue_url}
 
         # ---------- LAMBDA LAYER ----------
         self.utils_layer = _lambda.LayerVersion(
@@ -27,8 +32,7 @@ class LambdaStack(Stack):
             description="Shared utils for logging and tracing"
         )
 
-        # ---------- LAMBDA FUNCTIONS ----------
-
+        # ---------- USER FUNCTIONS ----------
         self.main_fn = _lambda.Function(
             self, "CreateUserFn",
             runtime=_lambda.Runtime.PYTHON_3_12,
@@ -37,11 +41,7 @@ class LambdaStack(Stack):
             role=iam_role,
             layers=[self.utils_layer],
             tracing=_lambda.Tracing.ACTIVE,
-            timeout=Duration.seconds(10),
-            environment={
-                "USER_TABLE": user_table.table_name,
-                **os_env
-            }
+            environment={"USER_TABLE": user_table.table_name, **os_env}
         )
 
         self.get_users_fn = _lambda.Function(
@@ -88,6 +88,7 @@ class LambdaStack(Stack):
             environment={"USER_TABLE": user_table.table_name, **os_env}
         )
 
+        # ---------- PRODUCT FUNCTIONS ----------
         self.create_product_fn = _lambda.Function(
             self, "CreateProductFn",
             runtime=_lambda.Runtime.PYTHON_3_12,
@@ -96,7 +97,6 @@ class LambdaStack(Stack):
             role=iam_role,
             layers=[self.utils_layer],
             tracing=_lambda.Tracing.ACTIVE,
-            timeout=Duration.seconds(10),
             environment={"PRODUCT_TABLE": product_table.table_name, **os_env}
         )
 
@@ -144,6 +144,7 @@ class LambdaStack(Stack):
             environment={"PRODUCT_TABLE": product_table.table_name, **os_env}
         )
 
+        # ---------- SEARCH FUNCTIONS ----------
         self.search_user_fn = _lambda.Function(
             self, "SearchUserFn",
             runtime=_lambda.Runtime.PYTHON_3_12,
@@ -168,7 +169,7 @@ class LambdaStack(Stack):
             environment={"PRODUCT_TABLE": product_table.table_name, **os_env}
         )
 
-        # ---------- STREAM TO OPENSEARCH LAMBDA ----------
+        # ---------- STREAM FUNCTION ----------
         self.stream_fn = _lambda.Function(
             self, "StreamToOpenSearchFn",
             runtime=_lambda.Runtime.PYTHON_3_12,
@@ -177,17 +178,93 @@ class LambdaStack(Stack):
             role=iam_role,
             layers=[self.utils_layer],
             tracing=_lambda.Tracing.ACTIVE,
-            timeout=Duration.seconds(60),  # Allow time to process batches
+            timeout=Duration.seconds(60),
             environment={**os_env}
         )
 
-        # Wire DynamoDB Streams to the stream Lambda
+        # ---------- S3 FUNCTIONS ----------
+        self.user_upload_url_fn = _lambda.Function(
+            self, "UserUploadUrlFn",
+            runtime=_lambda.Runtime.PYTHON_3_12,
+            handler="lambda_function.lambda_handler",
+            code=_lambda.Code.from_asset("lambda/Functions/UserUploadUrl"),
+            role=iam_role,
+            layers=[self.utils_layer],
+            tracing=_lambda.Tracing.ACTIVE,
+            timeout=Duration.seconds(30),
+            environment={"USER_TABLE": user_table.table_name, **s3_env}
+        )
+
+        self.user_download_url_fn = _lambda.Function(
+            self, "UserDownloadUrlFn",
+            runtime=_lambda.Runtime.PYTHON_3_12,
+            handler="lambda_function.lambda_handler",
+            code=_lambda.Code.from_asset("lambda/Functions/UserDownloadUrl"),
+            role=iam_role,
+            layers=[self.utils_layer],
+            tracing=_lambda.Tracing.ACTIVE,
+            environment={"USER_TABLE": user_table.table_name, **s3_env}
+        )
+
+        self.product_upload_url_fn = _lambda.Function(
+            self, "ProductUploadUrlFn",
+            runtime=_lambda.Runtime.PYTHON_3_12,
+            handler="lambda_function.lambda_handler",
+            code=_lambda.Code.from_asset("lambda/Functions/ProductUploadUrl"),
+            role=iam_role,
+            layers=[self.utils_layer],
+            tracing=_lambda.Tracing.ACTIVE,
+            timeout=Duration.seconds(30),
+            environment={"PRODUCT_TABLE": product_table.table_name, **s3_env}
+        )
+
+        self.product_download_url_fn = _lambda.Function(
+            self, "ProductDownloadUrlFn",
+            runtime=_lambda.Runtime.PYTHON_3_12,
+            handler="lambda_function.lambda_handler",
+            code=_lambda.Code.from_asset("lambda/Functions/ProductDownloadUrl"),
+            role=iam_role,
+            layers=[self.utils_layer],
+            tracing=_lambda.Tracing.ACTIVE,
+            environment={"PRODUCT_TABLE": product_table.table_name, **s3_env}
+        )
+
+        # ---------- ORDER FUNCTIONS ----------
+        self.order_product_fn = _lambda.Function(
+            self, "OrderProductFn",
+            runtime=_lambda.Runtime.PYTHON_3_12,
+            handler="lambda_function.lambda_handler",
+            code=_lambda.Code.from_asset("lambda/Functions/OrderProduct"),
+            role=iam_role,
+            layers=[self.utils_layer],
+            tracing=_lambda.Tracing.ACTIVE,
+            timeout=Duration.seconds(10),
+            environment={
+                "ORDER_TABLE": order_table.table_name,
+                "PRODUCT_TABLE": product_table.table_name,
+                **sqs_env
+            }
+        )
+
+        self.order_processing_fn = _lambda.Function(
+            self, "OrderProcessingFn",
+            runtime=_lambda.Runtime.PYTHON_3_12,
+            handler="lambda_function.lambda_handler",
+            code=_lambda.Code.from_asset("lambda/Functions/OrderProcessing"),
+            role=iam_role,
+            layers=[self.utils_layer],
+            tracing=_lambda.Tracing.ACTIVE,
+            timeout=Duration.seconds(30),
+            environment={"ORDER_TABLE": order_table.table_name}
+        )
+
+        # ---------- STREAM TRIGGERS ----------
         self.stream_fn.add_event_source(
             lambda_events.DynamoEventSource(
                 user_table,
                 starting_position=_lambda.StartingPosition.LATEST,
-                batch_size=10,          # Process up to 10 records at a time
-                bisect_batch_on_error=True,   # Split batch on error to isolate bad records
+                batch_size=10,
+                bisect_batch_on_error=True,
                 retry_attempts=2
             )
         )
@@ -202,12 +279,21 @@ class LambdaStack(Stack):
             )
         )
 
+        # ---------- SQS TRIGGER ----------
+        self.order_processing_fn.add_event_source(
+            lambda_events.SqsEventSource(
+                order_queue,
+                batch_size=10
+            )
+        )
+
         # ---------- API GATEWAY ----------
         api = apigw.RestApi(
             self,
             "CrudApi",
             rest_api_name="CrudApi",
-            deploy_options=apigw.StageOptions(stage_name="prod")
+            deploy_options=apigw.StageOptions(stage_name="prod"),
+            binary_media_types=["multipart/form-data", "image/jpeg", "image/png", "*/*"]
         )
 
         # /users
@@ -221,6 +307,14 @@ class LambdaStack(Stack):
         user_id.add_method("PUT",    apigw.LambdaIntegration(self.update_user_fn))
         user_id.add_method("DELETE", apigw.LambdaIntegration(self.delete_user_fn))
 
+        # /users/{id}/upload-url
+        user_upload = user_id.add_resource("upload-url")
+        user_upload.add_method("POST", apigw.LambdaIntegration(self.user_upload_url_fn))
+
+        # /users/{id}/download-url
+        user_download = user_id.add_resource("download-url")
+        user_download.add_method("GET", apigw.LambdaIntegration(self.user_download_url_fn))
+
         # /products
         products = api.root.add_resource("products")
         products.add_method("GET",  apigw.LambdaIntegration(self.get_product_fn))
@@ -232,6 +326,14 @@ class LambdaStack(Stack):
         product_id.add_method("PUT",    apigw.LambdaIntegration(self.update_product_fn))
         product_id.add_method("DELETE", apigw.LambdaIntegration(self.delete_product_fn))
 
+        # /products/{id}/upload-url
+        product_upload = product_id.add_resource("upload-url")
+        product_upload.add_method("POST", apigw.LambdaIntegration(self.product_upload_url_fn))
+
+        # /products/{id}/download-url
+        product_download = product_id.add_resource("download-url")
+        product_download.add_method("GET", apigw.LambdaIntegration(self.product_download_url_fn))
+
         # /search-users
         search_users = api.root.add_resource("search-users")
         search_users.add_method("GET", apigw.LambdaIntegration(self.search_user_fn))
@@ -239,3 +341,7 @@ class LambdaStack(Stack):
         # /search-products
         search_products = api.root.add_resource("search-products")
         search_products.add_method("GET", apigw.LambdaIntegration(self.search_product_fn))
+
+        # /orders
+        orders = api.root.add_resource("orders")
+        orders.add_method("POST", apigw.LambdaIntegration(self.order_product_fn))

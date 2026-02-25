@@ -9,36 +9,35 @@ class IamStack(Stack):
     def __init__(self, scope: Construct, construct_id: str, **kwargs):
         super().__init__(scope, construct_id, **kwargs)
 
-        # Role assumed by Lambda
         self.lambda_role = iam.Role(
             self,
             "LambdaCrudRole",
             assumed_by=iam.ServicePrincipal("lambda.amazonaws.com"),
-            description="Role for William_Phase2 Lambda functions with X-Ray and DynamoDB access"
+            description="Role for William_Phase2 Lambda functions"
         )
 
-        # 1. Basic logging permissions (Allows writing to CloudWatch)
+        # 1. Basic logging
         self.lambda_role.add_managed_policy(
             iam.ManagedPolicy.from_aws_managed_policy_name(
                 "service-role/AWSLambdaBasicExecutionRole"
             )
         )
 
-        # 2. X-Ray Tracing permissions
+        # 2. X-Ray
         self.lambda_role.add_managed_policy(
             iam.ManagedPolicy.from_aws_managed_policy_name(
                 "AWSXRayDaemonWriteAccess"
             )
         )
 
-        # 3. Full DynamoDB access (includes Streams read)
+        # 3. DynamoDB
         self.lambda_role.add_managed_policy(
             iam.ManagedPolicy.from_aws_managed_policy_name(
                 "AmazonDynamoDBFullAccess"
             )
         )
 
-        # 4. OpenSearch access
+        # 4. OpenSearch
         self.lambda_role.add_to_policy(
             iam.PolicyStatement(
                 sid="AllowOpenSearchAccess",
@@ -48,7 +47,7 @@ class IamStack(Stack):
             )
         )
 
-        # 5. DynamoDB Streams read permission (required for stream Lambda trigger)
+        # 5. DynamoDB Streams
         self.lambda_role.add_to_policy(
             iam.PolicyStatement(
                 sid="AllowDynamoDBStreams",
@@ -58,6 +57,36 @@ class IamStack(Stack):
                     "dynamodb:DescribeStream",
                     "dynamodb:ListStreams",
                     "dynamodb:GetRecords"
+                ],
+                resources=["*"]
+            )
+        )
+
+        # 6. S3
+        self.lambda_role.add_to_policy(
+            iam.PolicyStatement(
+                sid="AllowS3Access",
+                effect=iam.Effect.ALLOW,
+                actions=[
+                    "s3:PutObject",
+                    "s3:GetObject",
+                    "s3:DeleteObject",
+                    "s3:ListBucket"
+                ],
+                resources=["*"]
+            )
+        )
+
+        # 7. SQS
+        self.lambda_role.add_to_policy(
+            iam.PolicyStatement(
+                sid="AllowSQSAccess",
+                effect=iam.Effect.ALLOW,
+                actions=[
+                    "sqs:SendMessage",
+                    "sqs:ReceiveMessage",
+                    "sqs:DeleteMessage",
+                    "sqs:GetQueueAttributes"
                 ],
                 resources=["*"]
             )
