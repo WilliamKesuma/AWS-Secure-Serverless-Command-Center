@@ -11,7 +11,6 @@ from stack_cdk.opensearch_stack import OpenSearchStack
 
 app = cdk.App()
 
-# It's safer to use your explicit account ID if the environment variable fails
 env_ap = cdk.Environment(
     account=os.getenv('CDK_DEFAULT_ACCOUNT'), 
     region='ap-southeast-1'
@@ -31,6 +30,7 @@ os_stack = OpenSearchStack(
 )
 
 # 3. Main Compute Layer (CRUD API)
+# Added 'report_bucket' to pass the bucket object for permissions
 lambda_stack = LambdaStack(
     app, "LambdaStack",
     user_table=db_stack.user_table,
@@ -39,13 +39,13 @@ lambda_stack = LambdaStack(
     iam_role=iam_stack.lambda_role,
     os_endpoint=os_stack.domain_endpoint,
     bucket_name=s3_stack.bucket.bucket_name,
+    report_bucket=s3_stack.bucket, # <--- NEW: Pass the bucket construct
     order_queue_url=sqs_stack.order_queue.queue_url,
     order_queue=sqs_stack.order_queue,
     env=env_ap
 )
 
-# 4. Final Reporting Layer (Unified Scan + Upload + Email)
-# Removed report_topic because we are using direct SES calls now
+# 4. Final Reporting Layer (Daily Batch job)
 ReportingStack(app, "ReportingStack",
     order_table=db_stack.order_table,
     report_bucket=s3_stack.bucket,

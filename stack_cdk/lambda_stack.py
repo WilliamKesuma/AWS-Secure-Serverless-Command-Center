@@ -3,7 +3,8 @@ from aws_cdk import (
     Duration,
     aws_lambda as _lambda,
     aws_lambda_event_sources as lambda_events,
-    aws_apigateway as apigw
+    aws_apigateway as apigw,
+    aws_iam as iam
 )
 from constructs import Construct
 
@@ -13,6 +14,7 @@ class LambdaStack(Stack):
                  user_table, product_table, order_table, iam_role,
                  os_endpoint: str,
                  bucket_name: str,
+                 report_bucket, # S3 Bucket object passed from app.py
                  order_queue_url: str,
                  order_queue,
                  **kwargs):
@@ -25,7 +27,6 @@ class LambdaStack(Stack):
         sqs_env = {"ORDER_QUEUE_URL": order_queue_url}
 
         # ---------- LAMBDA LAYER ----------
-        # This layer is used by ALL functions and exported for ReportingStack
         self.utils_layer = _lambda.LayerVersion(
             self, "AppUtilsLayer",
             code=_lambda.Code.from_asset("lambda/Layer/utils_layer"),
@@ -33,7 +34,7 @@ class LambdaStack(Stack):
             description="Shared utils for logging and tracing"
         )
 
-        # Default params to keep code DRY (Don't Repeat Yourself)
+        # Default properties for all Lambda functions
         default_props = {
             "runtime": _lambda.Runtime.PYTHON_3_12,
             "handler": "lambda_function.lambda_handler",
@@ -132,26 +133,57 @@ class LambdaStack(Stack):
             environment={"PRODUCT_TABLE": product_table.table_name, **s3_env},
             **default_props)
 
+        # Unified Order Lambda (POST: Create, GET: List, GET: Export)
         self.order_product_fn = _lambda.Function(self, "OrderProductFn",
             code=_lambda.Code.from_asset("lambda/Functions/OrderProduct"),
-            environment={"ORDER_TABLE": order_table.table_name, "PRODUCT_TABLE": product_table.table_name, **sqs_env},
+            environment={
+                "ORDER_TABLE": order_table.table_name, 
+                "PRODUCT_TABLE": product_table.table_name, 
+                **sqs_env,
+                **s3_env
+            },
+            **default_props)
+
+        # NEW: Dashboard Lambda to serve the HTML UI
+        self.dashboard_fn = _lambda.Function(self, "DashboardFn",
+            code=_lambda.Code.from_asset("lambda/Functions/Dashboard"),
             **default_props)
 
         self.order_processing_fn = _lambda.Function(self, "OrderProcessingFn",
             code=_lambda.Code.from_asset("lambda/Functions/OrderProcessing"),
             environment={"ORDER_TABLE": order_table.table_name},
             **default_props)
+        
+        self.pokemon_fn = _lambda.Function(self, "GetPokemonFn",
+        code=_lambda.Code.from_asset("lambda/Functions/GetPokemon"),
+        **default_props)
 
+        # ---------- PERMISSIONS ----------
+        # Grant read/write to the report bucket
+        report_bucket.grant_read_write(self.order_product_fn)
+        
+        # Explicit S3:GetObject policy to prevent 403 errors on presigned URLs
+        self.order_product_fn.add_to_role_policy(iam.PolicyStatement(
+            effect=iam.Effect.ALLOW,
+            actions=["s3:GetObject"],
+            resources=[f"{report_bucket.bucket_arn}/*"]
+        ))
+        
         # ---------- TRIGGERS ----------
         self.stream_fn.add_event_source(lambda_events.DynamoEventSource(user_table, starting_position=_lambda.StartingPosition.LATEST))
         self.stream_fn.add_event_source(lambda_events.DynamoEventSource(product_table, starting_position=_lambda.StartingPosition.LATEST))
         self.order_processing_fn.add_event_source(lambda_events.SqsEventSource(order_queue))
+        
 
         # ---------- API GATEWAY ----------
         api = apigw.RestApi(self, "CrudApi",
             rest_api_name="CrudApi",
             deploy_options=apigw.StageOptions(stage_name="prod"),
-            binary_media_types=["multipart/form-data", "image/jpeg", "image/png", "*/*"]
+            binary_media_types=["multipart/form-data", "image/jpeg", "image/png", "*/*"],
+            default_cors_preflight_options=apigw.CorsOptions(
+                allow_origins=apigw.Cors.ALL_ORIGINS,
+                allow_methods=apigw.Cors.ALL_METHODS
+            )
         )
 
         # Users resource tree
@@ -178,7 +210,20 @@ class LambdaStack(Stack):
         product_id.add_resource("upload-url").add_method("POST", apigw.LambdaIntegration(self.product_upload_url_fn))
         product_id.add_resource("download-url").add_method("GET", apigw.LambdaIntegration(self.product_download_url_fn))
 
-        # Search & Orders
+        # Search
         api.root.add_resource("search-users").add_method("GET", apigw.LambdaIntegration(self.search_user_fn))
         api.root.add_resource("search-products").add_method("GET", apigw.LambdaIntegration(self.search_product_fn))
-        api.root.add_resource("orders").add_method("POST", apigw.LambdaIntegration(self.order_product_fn))
+        api.root.add_resource("pokemon").add_method("GET", apigw.LambdaIntegration(self.pokemon_fn))
+        
+        # Orders resource tree
+        orders = api.root.add_resource("orders")
+        orders.add_method("POST", apigw.LambdaIntegration(self.order_product_fn))
+        orders.add_method("GET", apigw.LambdaIntegration(self.order_product_fn))
+        
+        # Export sub-resource
+        export = orders.add_resource("export")
+        export.add_method("GET", apigw.LambdaIntegration(self.order_product_fn))
+
+        # NEW: Dashboard resource tree
+        dashboard = api.root.add_resource("dashboard")
+        dashboard.add_method("GET", apigw.LambdaIntegration(self.dashboard_fn))
