@@ -11,6 +11,7 @@ from stack_cdk.opensearch_stack import OpenSearchStack
 
 app = cdk.App()
 
+# It's safer to use your explicit account ID if the environment variable fails
 env_ap = cdk.Environment(
     account=os.getenv('CDK_DEFAULT_ACCOUNT'), 
     region='ap-southeast-1'
@@ -29,7 +30,7 @@ os_stack = OpenSearchStack(
     env=env_ap
 )
 
-# 3. Main Compute Layer
+# 3. Main Compute Layer (CRUD API)
 lambda_stack = LambdaStack(
     app, "LambdaStack",
     user_table=db_stack.user_table,
@@ -43,11 +44,11 @@ lambda_stack = LambdaStack(
     env=env_ap
 )
 
-# 4. Final Reporting Layer
+# 4. Final Reporting Layer (Unified Scan + Upload + Email)
+# Removed report_topic because we are using direct SES calls now
 ReportingStack(app, "ReportingStack",
     order_table=db_stack.order_table,
     report_bucket=s3_stack.bucket,
-    report_topic=s3_stack.report_topic,
     utils_layer=lambda_stack.utils_layer,
     env=env_ap
 )
