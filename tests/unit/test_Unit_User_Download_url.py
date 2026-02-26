@@ -7,7 +7,7 @@ import boto3
 from moto import mock_aws
 from conftest import MockLambdaContext
 
-FUNCTION_PATH = os.path.join(os.path.dirname(__file__), "../../lambda/Functions/GetUserById")
+FUNCTION_PATH = os.path.join(os.path.dirname(__file__), "../../lambda/Functions/UserDownloadUrl")
 
 def load_lambda():
     if "lambda_function" in sys.modules:
@@ -19,51 +19,62 @@ def load_lambda():
     return lambda_function
 
 @mock_aws
-class TestGetUserById(unittest.TestCase):
+class TestUserDownloadUrl(unittest.TestCase):
     def setUp(self):
         os.environ["USER_TABLE"] = "User"
+        os.environ["BUCKET_NAME"] = "test-bucket"
         self.ctx = MockLambdaContext()
-        
+
         dynamodb = boto3.resource("dynamodb", region_name="ap-southeast-1")
-        self.table = dynamodb.create_table(
+        dynamodb.create_table(
             TableName="User",
             KeySchema=[{"AttributeName": "userid", "KeyType": "HASH"}],
             AttributeDefinitions=[{"AttributeName": "userid", "AttributeType": "S"}],
             BillingMode="PAY_PER_REQUEST",
         )
-        self.table.put_item(Item={"userid": "u123", "name": "Alice", "email": "alice@example.com"})
+        table = dynamodb.Table("User")
+        table.put_item(Item={"userid": "user-123", "profile_image_key": "users/user-123/profile.jpg"})
 
-    def test_get_user_by_id_success(self):
+        s3 = boto3.client("s3", region_name="ap-southeast-1")
+        s3.create_bucket(Bucket="test-bucket", CreateBucketConfiguration={"LocationConstraint": "ap-southeast-1"})
+
+    def test_download_url_success(self):
         lf = load_lambda()
-        event = {"pathParameters": {"id": "u123"}}
-        
-        # Pass Mock context instead of {}
+        event = {"pathParameters": {"id": "user-123"}}
         response = lf.lambda_handler(event, self.ctx)
         
         self.assertEqual(response["statusCode"], 200)
         body = json.loads(response["body"])
-        
-        # Access nested data key
-        self.assertEqual(body["data"]["userid"], "u123")
-        self.assertEqual(body["data"]["name"], "Alice")
+        self.assertIn("download_url", body["data"])
 
-    def test_get_user_by_id_not_found(self):
+    def test_download_url_user_not_found(self):
         lf = load_lambda()
-        event = {"pathParameters": {"id": "nonexistent"}}
+        event = {"pathParameters": {"id": "non-existent"}}
         response = lf.lambda_handler(event, self.ctx)
         self.assertEqual(response["statusCode"], 404)
 
-    def test_get_user_by_id_missing_id(self):
+    def test_download_url_no_image(self):
+        # Setup user with no image key
+        dynamodb = boto3.resource("dynamodb", region_name="ap-southeast-1")
+        table = dynamodb.Table("User")
+        table.put_item(Item={"userid": "no-image-user"})
+        
+        lf = load_lambda()
+        event = {"pathParameters": {"id": "no-image-user"}}
+        response = lf.lambda_handler(event, self.ctx)
+        self.assertEqual(response["statusCode"], 404)
+
+    def test_download_url_missing_id(self):
         lf = load_lambda()
         event = {"pathParameters": {}}
         response = lf.lambda_handler(event, self.ctx)
         self.assertEqual(response["statusCode"], 400)
 
-    def test_get_user_by_id_no_path_parameters(self):
+    def test_download_url_no_path_parameters(self):
         lf = load_lambda()
         event = {}
         response = lf.lambda_handler(event, self.ctx)
         self.assertEqual(response["statusCode"], 400)
 
 if __name__ == "__main__":
-    unittest.main() 
+    unittest.main()

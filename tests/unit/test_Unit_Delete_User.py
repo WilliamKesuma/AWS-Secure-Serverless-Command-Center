@@ -5,37 +5,44 @@ import importlib
 import unittest
 import boto3
 from moto import mock_aws
+from conftest import MockLambdaContext
 
-CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
-LAMBDA_PATH = os.path.abspath(os.path.join(CURRENT_DIR, "../../lambda/Functions/DeleteUser"))
+FUNCTION_PATH = os.path.join(os.path.dirname(__file__), "../../lambda/Functions/DeleteUser")
+
+def load_lambda():
+    if "lambda_function" in sys.modules:
+        del sys.modules["lambda_function"]
+    if FUNCTION_PATH not in sys.path:
+        sys.path.insert(0, FUNCTION_PATH)
+    import lambda_function
+    importlib.reload(lambda_function)
+    return lambda_function
 
 @mock_aws
 class TestDeleteUser(unittest.TestCase):
     def setUp(self):
-        if LAMBDA_PATH not in sys.path:
-            sys.path.insert(0, LAMBDA_PATH)
-            
         os.environ["USER_TABLE"] = "User"
-        os.environ["AWS_DEFAULT_REGION"] = "ap-southeast-1"
-        
-        self.dynamodb = boto3.resource("dynamodb", region_name="ap-southeast-1")
-        self.table = self.dynamodb.create_table(
+        self.ctx = MockLambdaContext()
+        dynamodb = boto3.resource("dynamodb", region_name="ap-southeast-1")
+        self.table = dynamodb.create_table(
             TableName="User",
             KeySchema=[{"AttributeName": "userid", "KeyType": "HASH"}],
             AttributeDefinitions=[{"AttributeName": "userid", "AttributeType": "S"}],
-            BillingMode="PAY_PER_REQUEST"
+            BillingMode="PAY_PER_REQUEST",
         )
         self.table.put_item(Item={"userid": "123", "name": "John"})
 
-        import lambda_function
-        self.module = importlib.reload(lambda_function)
-
     def test_delete_user_success(self):
+        lf = load_lambda()
         event = {"pathParameters": {"id": "123"}}
-        response = self.module.lambda_handler(event, {})
+        response = lf.lambda_handler(event, self.ctx)
         self.assertEqual(response["statusCode"], 200)
 
     def test_delete_user_not_found(self):
+        lf = load_lambda()
         event = {"pathParameters": {"id": "nonexistent"}}
-        response = self.module.lambda_handler(event, {})
+        response = lf.lambda_handler(event, self.ctx)
         self.assertEqual(response["statusCode"], 404)
+
+if __name__ == "__main__":
+    unittest.main()

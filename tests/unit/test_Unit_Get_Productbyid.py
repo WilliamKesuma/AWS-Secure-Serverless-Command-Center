@@ -5,6 +5,8 @@ import importlib
 import unittest
 import boto3
 from moto import mock_aws
+# Ensure you import your Mock Context from conftest
+from conftest import MockLambdaContext
 
 FUNCTION_PATH = os.path.join(os.path.dirname(__file__), "../../lambda/Functions/GetProductById")
 
@@ -17,11 +19,13 @@ def load_lambda():
     importlib.reload(lambda_function)
     return lambda_function
 
-
 @mock_aws
 class TestGetProductById(unittest.TestCase):
     def setUp(self):
         os.environ["PRODUCT_TABLE"] = "Product"
+        # Create an instance of the mock context to use in all tests
+        self.ctx = MockLambdaContext()
+        
         dynamodb = boto3.resource("dynamodb", region_name="ap-southeast-1")
         self.table = dynamodb.create_table(
             TableName="Product",
@@ -34,30 +38,37 @@ class TestGetProductById(unittest.TestCase):
     def test_get_product_by_id_success(self):
         lf = load_lambda()
         event = {"pathParameters": {"id": "p123"}}
-        response = lf.lambda_handler(event, {})
+        
+        # FIX 1: Pass self.ctx instead of {}
+        response = lf.lambda_handler(event, self.ctx)
+        
         self.assertEqual(response["statusCode"], 200)
         body = json.loads(response["body"])
-        self.assertEqual(body["productid"], "p123")
-        self.assertEqual(body["name"], "Laptop")
+        
+        # FIX 2: Access attributes via body["data"] because of create_response logic
+        self.assertEqual(body["data"]["productid"], "p123")
+        self.assertEqual(body["data"]["name"], "Laptop")
 
     def test_get_product_by_id_not_found(self):
         lf = load_lambda()
         event = {"pathParameters": {"id": "nonexistent"}}
-        response = lf.lambda_handler(event, {})
+        # FIX: Pass self.ctx
+        response = lf.lambda_handler(event, self.ctx)
         self.assertEqual(response["statusCode"], 404)
 
     def test_get_product_by_id_missing_id(self):
         lf = load_lambda()
         event = {"pathParameters": {}}
-        response = lf.lambda_handler(event, {})
+        # FIX: Pass self.ctx
+        response = lf.lambda_handler(event, self.ctx)
         self.assertEqual(response["statusCode"], 400)
 
     def test_get_product_by_id_no_path_parameters(self):
         lf = load_lambda()
         event = {}
-        response = lf.lambda_handler(event, {})
+        # FIX: Pass self.ctx
+        response = lf.lambda_handler(event, self.ctx)
         self.assertEqual(response["statusCode"], 400)
-
 
 if __name__ == "__main__":
     unittest.main()

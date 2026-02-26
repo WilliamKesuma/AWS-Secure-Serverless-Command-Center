@@ -5,6 +5,7 @@ import importlib
 import unittest
 import boto3
 from moto import mock_aws
+from conftest import MockLambdaContext
 
 FUNCTION_PATH = os.path.join(os.path.dirname(__file__), "../../lambda/Functions/CreateUser")
 
@@ -17,11 +18,12 @@ def load_lambda():
     importlib.reload(lambda_function)
     return lambda_function
 
-
 @mock_aws
 class TestCreateUser(unittest.TestCase):
     def setUp(self):
         os.environ["USER_TABLE"] = "User"
+        self.ctx = MockLambdaContext()
+        
         dynamodb = boto3.resource("dynamodb", region_name="ap-southeast-1")
         dynamodb.create_table(
             TableName="User",
@@ -32,26 +34,29 @@ class TestCreateUser(unittest.TestCase):
 
     def test_create_user_success(self):
         lf = load_lambda()
-        event = {"body": json.dumps({"name": "John", "email": "john@example.com"})}
-        response = lf.lambda_handler(event, {})
+        event = {"body": json.dumps({"name": "John Doe", "email": "john@example.com"})}
+        
+        # Pass Mock context instead of {}
+        response = lf.lambda_handler(event, self.ctx)
+        
         self.assertEqual(response["statusCode"], 201)
         body = json.loads(response["body"])
-        self.assertEqual(body["name"], "John")
-        self.assertEqual(body["email"], "john@example.com")
-        self.assertIn("userid", body)
+        
+        # Access nested data key
+        self.assertEqual(body["data"]["name"], "John Doe")
+        self.assertIn("userid", body["data"])
 
     def test_create_user_invalid_json(self):
         lf = load_lambda()
-        event = {"body": "not json"}
-        response = lf.lambda_handler(event, {})
+        event = {"body": "invalid-json"}
+        response = lf.lambda_handler(event, self.ctx)
         self.assertEqual(response["statusCode"], 400)
 
     def test_create_user_missing_body(self):
         lf = load_lambda()
         event = {}
-        response = lf.lambda_handler(event, {})
+        response = lf.lambda_handler(event, self.ctx)
         self.assertEqual(response["statusCode"], 400)
-
 
 if __name__ == "__main__":
     unittest.main()

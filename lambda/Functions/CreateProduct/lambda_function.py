@@ -17,6 +17,7 @@ OS_ENDPOINT = os.environ.get("OS_ENDPOINT", "")
 OS_INDEX = "products"
 
 
+
 @logger.inject_lambda_context(log_event=True)
 @tracer.capture_lambda_handler
 def lambda_handler(event, context):

@@ -3,7 +3,10 @@ import os
 import json
 import base64
 import uuid
-import cgi
+try:
+    import cgi
+except ImportError:
+    import legacy_cgi as cgi
 from io import BytesIO
 
 # Import shared logic from your Lambda Layer
