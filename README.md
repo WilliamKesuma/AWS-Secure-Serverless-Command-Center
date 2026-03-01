@@ -1,58 +1,52 @@
+# 🚀 AWS Secure Serverless Command Center
 
-# Welcome to your CDK Python project!
+**Developer:** William Kesuma  
 
-This is a blank project for CDK development with Python.
+This project is a high-performance, serverless backend architecture built using **AWS CDK**. It manages secure user authentication, product catalogs, and automated order processing with real-time search indexing.
 
-The `cdk.json` file tells the CDK Toolkit how to execute your app.
+---
 
-This project is set up like a standard Python project.  The initialization
-process also creates a virtualenv within this project, stored under the `.venv`
-directory.  To create the virtualenv it assumes that there is a `python3`
-(or `python` for Windows) executable in your path with access to the `venv`
-package. If for any reason the automatic creation of the virtualenv fails,
-you can create the virtualenv manually.
+## 🏗️ Architecture Overview
 
-To manually create a virtualenv on MacOS and Linux:
+### 🔐 Security & Identity
+* **AWS Cognito**: Secure User Pool for authentication and email-based sign-up.
+* **IAM Stacks**: Fine-grained permissions for Lambda, S3, and DynamoDB.
 
-```
-$ python3 -m venv .venv
-```
+### 📦 Data & Storage
+* **DynamoDB**: NoSQL storage for Users and Products.
+* **DynamoDB Streams**: Triggers automated indexing of data into OpenSearch.
+* **S3 Buckets**: Dedicated storage for secure file uploads and reporting.
 
-After the init process completes and the virtualenv is created, you can use the following
-step to activate your virtualenv.
+### 📁 Repository Structure
+* **stack_cdk/**: Modular infrastructure definitions (Cognito, DynamoDB, etc.).
+* **lambda/**: Business logic for API handlers and background workers.
+* **lambda/Layer/**: Shared utils_layer containing common dependencies.
+* **tests/**: Comprehensive test cases for the serverless components.
 
-```
-$ source .venv/bin/activate
-```
+### ⚙️ Automation & Workflows
+* **Step Functions**: Orchestrates the order processing state machine with retry logic.
+* **EventBridge**: Scheduled batch jobs for automated reporting.
+* **SNS**: Real-time email notifications for order updates.
 
-If you are a Windows platform, you would activate the virtualenv like this:
+### 🔍 Search
+* **OpenSearch Service**: Full-text search capabilities for the product dashboard.
 
-```
-% .venv\Scripts\activate.bat
-```
+---
 
-Once the virtualenv is activated, you can install the required dependencies.
+## 🛠️ Setup & Deployment
 
-```
-$ pip install -r requirements.txt
-```
+### 1. Environment Setup
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
 
-At this point you can now synthesize the CloudFormation template for this code.
+#Synthesize CloudFormation template
+cdk synth
 
-```
-$ cdk synth
-```
+# Deploy all stacks to AWS
+cdk deploy --all
 
-To add additional dependencies, for example other CDK libraries, just add
-them to your `requirements.txt` file and rerun the `python -m pip install -r requirements.txt`
-command.
+# Run all unit tests
+pytest tests/unit
 
-## Useful commands
-
- * `cdk ls`          list all stacks in the app
- * `cdk synth`       emits the synthesized CloudFormation template
- * `cdk deploy`      deploy this stack to your default AWS account/region
- * `cdk diff`        compare deployed stack with current state
- * `cdk docs`        open CDK documentation
-
-Enjoy!
