@@ -2,6 +2,7 @@ from aws_cdk import (
     Stack,
     RemovalPolicy,
     aws_s3 as s3,
+    Tags, # Added import for tagging
 )
 from constructs import Construct
 
@@ -19,3 +20,6 @@ class S3Stack(Stack):
                 allowed_headers=["*"]
             )]
         )
+
+        # Force a state update to clear the console error
+        Tags.of(self).add("StackStatus", "ResettingConsoleView")
