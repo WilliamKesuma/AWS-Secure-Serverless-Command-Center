@@ -7,6 +7,7 @@ from stack_cdk.opensearch_stack import OpenSearchStack
 from stack_cdk.s3_stack import S3Stack
 from stack_cdk.sqs_stack import SqsStack
 from stack_cdk.reporting_stack import ReportingStack
+from stack_cdk.cognito_stack import CognitoStack  # <--- New Import
 
 app = cdk.App()
 
@@ -14,9 +15,17 @@ iam_stack = IamStack(app, "IamStack")
 db_stack = DynamodbStack(app, "DynamodbStack")
 s3_stack = S3Stack(app, "S3Stack")
 sqs_stack = SqsStack(app, "SqsStack")
+
+# 1. Initialize Cognito (Needs user_table for Post-Confirmation Sync)
+cognito_stack = CognitoStack(
+    app, "CognitoStack", 
+    user_table=db_stack.user_table
+)
+
 os_stack = OpenSearchStack(app, "OpenSearchStack",
     lambda_role_arn=iam_stack.lambda_role.role_arn)
 
+# 2. Update LambdaStack to include user_pool
 lambda_stack = LambdaStack(
     app, "LambdaStack",
     user_table=db_stack.user_table,
@@ -27,7 +36,8 @@ lambda_stack = LambdaStack(
     bucket_name=s3_stack.bucket.bucket_name,
     report_bucket=s3_stack.bucket,
     order_queue_url=sqs_stack.order_queue.queue_url,
-    order_queue=sqs_stack.order_queue
+    order_queue=sqs_stack.order_queue,
+    user_pool=cognito_stack.user_pool  # <--- Passing User Pool for Authorizer
 )
 
 reporting_stack = ReportingStack(
@@ -59,6 +69,7 @@ SnsStack(app, "SnsStack",
         lambda_stack.order_product_fn,
         lambda_stack.order_processing_fn,
         lambda_stack.pokemon_fn,
+        cognito_stack.post_confirm_fn # Recommended: add the sync function to logging
     ]
 )
 

@@ -12,7 +12,6 @@ from aws_cdk import (
 )
 from constructs import Construct
 
-
 class LambdaStack(Stack):
 
     def __init__(self, scope: Construct, construct_id: str,
@@ -22,10 +21,12 @@ class LambdaStack(Stack):
                  report_bucket,
                  order_queue_url: str,
                  order_queue,
+                 user_pool,  # Passed from CognitoStack via app.py
                  **kwargs):
 
         super().__init__(scope, construct_id, **kwargs)
 
+        # Environment variable dictionaries
         os_env = {"OS_ENDPOINT": os_endpoint}
         s3_env = {"BUCKET_NAME": bucket_name}
         sqs_env = {"ORDER_QUEUE_URL": order_queue_url}
@@ -89,111 +90,38 @@ class LambdaStack(Stack):
             code=_lambda.Code.from_asset("lambda/Functions/DeleteProduct"),
             environment={"PRODUCT_TABLE": product_table.table_name, **os_env}, **default_props)
 
-        # ---------- SEARCH & STREAM ----------
-        self.search_user_fn = _lambda.Function(self, "SearchUserFn",
-            code=_lambda.Code.from_asset("lambda/Functions/Search User"),
-            environment={"USER_TABLE": user_table.table_name, **os_env}, **default_props)
+        # ---------- SEARCH, STREAM, S3 & ORDERS ----------
+        self.search_user_fn = _lambda.Function(self, "SearchUserFn", code=_lambda.Code.from_asset("lambda/Functions/Search User"), environment={"USER_TABLE": user_table.table_name, **os_env}, **default_props)
+        self.search_product_fn = _lambda.Function(self, "SearchProductFn", code=_lambda.Code.from_asset("lambda/Functions/Search Product"), environment={"PRODUCT_TABLE": product_table.table_name, **os_env}, **default_props)
+        self.stream_fn = _lambda.Function(self, "StreamToOpenSearchFn", code=_lambda.Code.from_asset("lambda/Functions/StreamToOpenSearch"), environment={**os_env}, **default_props)
+        self.user_upload_url_fn = _lambda.Function(self, "UserUploadUrlFn", code=_lambda.Code.from_asset("lambda/Functions/UserUploadUrl"), environment={"USER_TABLE": user_table.table_name, **s3_env}, **default_props)
+        self.user_download_url_fn = _lambda.Function(self, "UserDownloadUrlFn", code=_lambda.Code.from_asset("lambda/Functions/UserDownloadUrl"), environment={"USER_TABLE": user_table.table_name, **s3_env}, **default_props)
+        self.product_upload_url_fn = _lambda.Function(self, "ProductUploadUrlFn", code=_lambda.Code.from_asset("lambda/Functions/ProductUploadUrl"), environment={"PRODUCT_TABLE": product_table.table_name, **s3_env}, **default_props)
+        self.product_download_url_fn = _lambda.Function(self, "ProductDownloadUrlFn", code=_lambda.Code.from_asset("lambda/Functions/ProductDownloadUrl"), environment={"PRODUCT_TABLE": product_table.table_name, **s3_env}, **default_props)
+        self.order_product_fn = _lambda.Function(self, "OrderProductFn", code=_lambda.Code.from_asset("lambda/Functions/OrderProduct"), environment={"ORDER_TABLE": order_table.table_name, "PRODUCT_TABLE": product_table.table_name, **sqs_env, **s3_env}, **default_props)
+        self.order_processing_fn = _lambda.Function(self, "OrderProcessingFn", code=_lambda.Code.from_asset("lambda/Functions/OrderProcessing"), environment={"ORDER_TABLE": order_table.table_name}, **default_props)
+        self.dashboard_fn = _lambda.Function(self, "DashboardFn", code=_lambda.Code.from_asset("lambda/Functions/Dashboard"), **default_props)
+        self.pokemon_fn = _lambda.Function(self, "GetPokemonFn", code=_lambda.Code.from_asset("lambda/Functions/GetPokemon"), **default_props)
+        self.poke_importer_fn = _lambda.Function(self, "PokeImporterFn", code=_lambda.Code.from_asset("lambda/Functions/PokeImporter"), environment={"PRODUCT_TABLE": product_table.table_name}, **default_props)
 
-        self.search_product_fn = _lambda.Function(self, "SearchProductFn",
-            code=_lambda.Code.from_asset("lambda/Functions/Search Product"),
-            environment={"PRODUCT_TABLE": product_table.table_name, **os_env}, **default_props)
+        # ---------- STEP FUNCTION ----------
+        invoke_pokemon = tasks.LambdaInvoke(self, "InvokePokeAPI", lambda_function=self.pokemon_fn, payload=sfn.TaskInput.from_object({"name": sfn.JsonPath.string_at("$.name")}), result_path="$.result")
+        invoke_pokemon.add_retry(errors=["ServerDown", "States.TaskFailed"], interval=Duration.seconds(2), max_attempts=5, backoff_rate=2.0)
+        fail_state = sfn.Fail(self, "AllRetriesExhausted", error="ServerDown", cause="PokeAPI unavailable")
+        invoke_pokemon.add_catch(fail_state, errors=["ServerDown", "States.TaskFailed"], result_path="$.error")
+        self.poke_state_machine = sfn.StateMachine(self, "PokeRetryStateMachine", definition_body=sfn.DefinitionBody.from_chainable(invoke_pokemon), state_machine_type=sfn.StateMachineType.EXPRESS, timeout=Duration.seconds(60))
 
-        self.stream_fn = _lambda.Function(self, "StreamToOpenSearchFn",
-            code=_lambda.Code.from_asset("lambda/Functions/StreamToOpenSearch"),
-            environment={**os_env}, **default_props)
-
-        # ---------- S3 FUNCTIONS ----------
-        self.user_upload_url_fn = _lambda.Function(self, "UserUploadUrlFn",
-            code=_lambda.Code.from_asset("lambda/Functions/UserUploadUrl"),
-            environment={"USER_TABLE": user_table.table_name, **s3_env}, **default_props)
-
-        self.user_download_url_fn = _lambda.Function(self, "UserDownloadUrlFn",
-            code=_lambda.Code.from_asset("lambda/Functions/UserDownloadUrl"),
-            environment={"USER_TABLE": user_table.table_name, **s3_env}, **default_props)
-
-        self.product_upload_url_fn = _lambda.Function(self, "ProductUploadUrlFn",
-            code=_lambda.Code.from_asset("lambda/Functions/ProductUploadUrl"),
-            environment={"PRODUCT_TABLE": product_table.table_name, **s3_env}, **default_props)
-
-        self.product_download_url_fn = _lambda.Function(self, "ProductDownloadUrlFn",
-            code=_lambda.Code.from_asset("lambda/Functions/ProductDownloadUrl"),
-            environment={"PRODUCT_TABLE": product_table.table_name, **s3_env}, **default_props)
-
-        # ---------- ORDER FUNCTIONS ----------
-        self.order_product_fn = _lambda.Function(self, "OrderProductFn",
-            code=_lambda.Code.from_asset("lambda/Functions/OrderProduct"),
-            environment={"ORDER_TABLE": order_table.table_name, "PRODUCT_TABLE": product_table.table_name, **sqs_env, **s3_env},
-            **default_props)
-
-        self.order_processing_fn = _lambda.Function(self, "OrderProcessingFn",
-            code=_lambda.Code.from_asset("lambda/Functions/OrderProcessing"),
-            environment={"ORDER_TABLE": order_table.table_name}, **default_props)
-
-        # ---------- DASHBOARD & POKEMON ----------
-        self.dashboard_fn = _lambda.Function(self, "DashboardFn",
-            code=_lambda.Code.from_asset("lambda/Functions/Dashboard"), **default_props)
-
-        self.pokemon_fn = _lambda.Function(self, "GetPokemonFn",
-            code=_lambda.Code.from_asset("lambda/Functions/GetPokemon"), **default_props)
-
-        self.poke_importer_fn = _lambda.Function(self, "PokeImporterFn",
-            code=_lambda.Code.from_asset("lambda/Functions/PokeImporter"),
-            environment={"PRODUCT_TABLE": product_table.table_name},
-            **default_props)
-
-        # ---------- STEP FUNCTION - RETRY MECHANISM ----------
-        invoke_pokemon = tasks.LambdaInvoke(self, "InvokePokeAPI",
-            lambda_function=self.pokemon_fn,
-            payload=sfn.TaskInput.from_object({
-                "name": sfn.JsonPath.string_at("$.name")
-            }),
-            result_path="$.result"
-        )
-
-        invoke_pokemon.add_retry(
-            errors=["ServerDown", "States.TaskFailed"],
-            interval=Duration.seconds(2),
-            max_attempts=5,
-            backoff_rate=2.0
-        )
-
-        fail_state = sfn.Fail(self, "AllRetriesExhausted",
-            error="ServerDown",
-            cause="PokeAPI still unavailable after 5 retries"
-        )
-
-        invoke_pokemon.add_catch(fail_state,
-            errors=["ServerDown", "States.TaskFailed"],
-            result_path="$.error"
-        )
-
-        self.poke_state_machine = sfn.StateMachine(self, "PokeRetryStateMachine",
-            definition_body=sfn.DefinitionBody.from_chainable(invoke_pokemon),
-            state_machine_type=sfn.StateMachineType.EXPRESS,
-            timeout=Duration.seconds(60)
-        )
-
-        # ---------- PERMISSIONS & SCHEDULING ----------
+        # ---------- TRIGGERS & PERMISSIONS ----------
         report_bucket.grant_read_write(self.order_product_fn)
         product_table.grant_read_write_data(self.poke_importer_fn)
+        self.stream_fn.add_event_source(lambda_events.DynamoEventSource(user_table, starting_position=_lambda.StartingPosition.LATEST))
+        self.stream_fn.add_event_source(lambda_events.DynamoEventSource(product_table, starting_position=_lambda.StartingPosition.LATEST))
+        self.order_processing_fn.add_event_source(lambda_events.SqsEventSource(order_queue))
 
-        self.order_product_fn.add_to_role_policy(iam.PolicyStatement(
-            effect=iam.Effect.ALLOW,
-            actions=["s3:GetObject"],
-            resources=[f"{report_bucket.bucket_arn}/*"]))
-
-        daily_rule = events.Rule(self, "DailyPokeImportRule",
-            schedule=events.Schedule.cron(minute="0", hour="0"),
-            description="Imports 5 random Pokemon into Product table daily")
-        daily_rule.add_target(targets.LambdaFunction(self.poke_importer_fn))
-
-        # ---------- TRIGGERS ----------
-        self.stream_fn.add_event_source(lambda_events.DynamoEventSource(
-            user_table, starting_position=_lambda.StartingPosition.LATEST))
-        self.stream_fn.add_event_source(lambda_events.DynamoEventSource(
-            product_table, starting_position=_lambda.StartingPosition.LATEST))
-        self.order_processing_fn.add_event_source(
-            lambda_events.SqsEventSource(order_queue))
+        # ---------- COGNITO AUTHORIZER ----------
+        auth = apigw.CognitoUserPoolsAuthorizer(self, "WilliamApiAuthorizer",
+            cognito_user_pools=[user_pool]
+        )
 
         # ---------- API GATEWAY ----------
         api = apigw.RestApi(self, "CrudApi",
@@ -204,69 +132,52 @@ class LambdaStack(Stack):
                 allow_origins=apigw.Cors.ALL_ORIGINS,
                 allow_methods=apigw.Cors.ALL_METHODS))
 
+        # Helper for Protected Methods
+        auth_props = {
+            "authorizer": auth,
+            "authorization_type": apigw.AuthorizationType.COGNITO
+        }
+
         # /users
         users = api.root.add_resource("users")
-        users.add_method("GET", apigw.LambdaIntegration(self.get_users_fn))
-        users.add_method("POST", apigw.LambdaIntegration(self.main_fn))
+        users.add_method("GET", apigw.LambdaIntegration(self.get_users_fn), **auth_props)
+        users.add_method("POST", apigw.LambdaIntegration(self.main_fn)) # Public for signup
 
         user_id = users.add_resource("{id}")
-        user_id.add_method("GET", apigw.LambdaIntegration(self.get_user_by_id_fn))
-        user_id.add_method("PUT", apigw.LambdaIntegration(self.update_user_fn))
-        user_id.add_method("DELETE", apigw.LambdaIntegration(self.delete_user_fn))
+        user_id.add_method("GET", apigw.LambdaIntegration(self.get_user_by_id_fn), **auth_props)
+        user_id.add_method("PUT", apigw.LambdaIntegration(self.update_user_fn), **auth_props)
+        user_id.add_method("DELETE", apigw.LambdaIntegration(self.delete_user_fn), **auth_props)
 
         # /products
         products = api.root.add_resource("products")
-        products.add_method("GET", apigw.LambdaIntegration(self.get_product_fn))
-        products.add_method("POST", apigw.LambdaIntegration(self.create_product_fn))
+        products.add_method("GET", apigw.LambdaIntegration(self.get_product_fn)) # Public view
+        products.add_method("POST", apigw.LambdaIntegration(self.create_product_fn), **auth_props)
 
         product_id = products.add_resource("{id}")
         product_id.add_method("GET", apigw.LambdaIntegration(self.get_product_by_id_fn))
-        product_id.add_method("PUT", apigw.LambdaIntegration(self.update_product_fn))
-        product_id.add_method("DELETE", apigw.LambdaIntegration(self.delete_product_fn))
+        product_id.add_method("PUT", apigw.LambdaIntegration(self.update_product_fn), **auth_props)
+        product_id.add_method("DELETE", apigw.LambdaIntegration(self.delete_product_fn), **auth_props)
 
         # /orders
         orders = api.root.add_resource("orders")
-        orders.add_method("POST", apigw.LambdaIntegration(self.order_product_fn))
-        orders.add_method("GET", apigw.LambdaIntegration(self.order_product_fn))
-        orders.add_resource("export").add_method("GET", apigw.LambdaIntegration(self.order_product_fn))
+        orders.add_method("POST", apigw.LambdaIntegration(self.order_product_fn), **auth_props)
+        orders.add_method("GET", apigw.LambdaIntegration(self.order_product_fn), **auth_props)
 
-        # /dashboard
+        # /dashboard & /pokemon
         api.root.add_resource("dashboard").add_method("GET", apigw.LambdaIntegration(self.dashboard_fn))
-
-        # /pokemon - direct Lambda (no retry)
         api.root.add_resource("pokemon").add_method("GET", apigw.LambdaIntegration(self.pokemon_fn))
 
-        # /pokemon-secure - Manual AWS integration to Step Functions with proper request/response mapping
-        apigw_role = iam.Role(self, "ApiGwSfnRole",
-            assumed_by=iam.ServicePrincipal("apigateway.amazonaws.com")
-        )
-        apigw_role.add_to_policy(iam.PolicyStatement(
-            actions=["states:StartSyncExecution"],
-            resources=[self.poke_state_machine.state_machine_arn]
-        ))
-
+        # --- Pokemon Secure (Step Function Integration) ---
+        apigw_role = iam.Role(self, "ApiGwSfnRole", assumed_by=iam.ServicePrincipal("apigateway.amazonaws.com"))
+        apigw_role.add_to_policy(iam.PolicyStatement(actions=["states:StartSyncExecution"], resources=[self.poke_state_machine.state_machine_arn]))
+        
         sfn_integration = apigw.AwsIntegration(
             service="states",
             action="StartSyncExecution",
             options=apigw.IntegrationOptions(
                 credentials_role=apigw_role,
-                request_templates={
-                    "application/json": f'{{"input": "$util.escapeJavaScript($input.body)", "stateMachineArn": "${{{self.poke_state_machine.state_machine_arn}}}"}}' 
-                },
-                integration_responses=[
-                    apigw.IntegrationResponse(
-                        status_code="200",
-                        response_templates={
-                            "application/json": "#set($output = $util.parseJson($input.path('$.output')))\n$output.result.Payload.body"
-                        }
-                    )
-                ]
+                request_templates={"application/json": f'{{"input": "$util.escapeJavaScript($input.body)", "stateMachineArn": "${{{self.poke_state_machine.state_machine_arn}}}"}}'},
+                integration_responses=[apigw.IntegrationResponse(status_code="200", response_templates={"application/json": "#set($output = $util.parseJson($input.path('$.output')))\n$output.result.Payload.body"})]
             )
         )
-
-        pokemon_secure = api.root.add_resource("pokemon-secure")
-        pokemon_secure.add_method(
-            "POST",
-            sfn_integration,
-            method_responses=[apigw.MethodResponse(status_code="200")]
-        )
+        api.root.add_resource("pokemon-secure").add_method("POST", sfn_integration, method_responses=[apigw.MethodResponse(status_code="200")], **auth_props)
