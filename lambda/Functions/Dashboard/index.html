@@ -3,87 +3,159 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>William Phase 2 - Admin Dashboard</title>
+    <title>William Phase 2 - Command Center</title>
     <script src="https://cdn.tailwindcss.com"></script>
 </head>
-<body class="bg-gray-100 p-8">
+<body class="bg-gray-100 p-8 font-sans">
 
-    <div id="login-modal" class="fixed inset-0 bg-gray-900 bg-opacity-90 flex items-center justify-center z-50">
-        <div class="bg-white p-8 rounded-lg shadow-2xl w-96">
-            <h2 class="text-2xl font-bold mb-2">Secure Login</h2>
-            <p class="text-sm text-gray-500 mb-6">Enter your Cognito credentials</p>
-            <input id="login-email" type="email" placeholder="Email" class="w-full border p-2 rounded mb-3">
-            <input id="login-password" type="password" placeholder="Password" class="w-full border p-2 rounded mb-4">
-            <button onclick="handleLogin()" class="w-full bg-blue-600 text-white py-2 rounded hover:bg-blue-700 font-bold">Sign In</button>
-            <p id="login-error" class="text-red-500 text-sm mt-3 hidden"></p>
+    <div id="login-modal" class="fixed inset-0 bg-gray-900 bg-opacity-95 flex items-center justify-center z-50">
+        <div class="bg-white p-8 rounded-xl shadow-2xl w-full max-w-md border-t-8 border-blue-600">
+            <h2 id="modal-title" class="text-3xl font-black mb-2 text-gray-800 tracking-tight">Access Portal</h2>
+            <p id="modal-desc" class="text-sm text-gray-500 mb-6">Authenticate to connect to the AWS Cloud Infrastructure.</p>
+            
+            <div id="auth-form" class="space-y-4">
+                <input id="auth-email" type="email" placeholder="Email Address" class="w-full border-2 p-3 rounded-lg focus:border-blue-500 outline-none transition-all">
+                <input id="auth-password" type="password" placeholder="Password" class="w-full border-2 p-3 rounded-lg focus:border-blue-500 outline-none transition-all">
+                
+                <div id="confirm-box" class="hidden">
+                    <label class="text-xs font-bold text-blue-600 uppercase">Verification Code</label>
+                    <input id="auth-code" type="text" placeholder="6-digit code from email" class="w-full border-2 border-blue-200 p-3 rounded-lg bg-blue-50 focus:border-blue-500 outline-none">
+                </div>
+
+                <button onclick="handleSubmit()" id="submit-btn" class="w-full bg-blue-600 text-white py-4 rounded-xl font-black text-lg hover:bg-blue-700 shadow-lg transform active:scale-95 transition-all">
+                    Sign In
+                </button>
+            </div>
+            
+            <div class="mt-8 text-center border-t pt-4">
+                <button onclick="toggleAuthMode()" id="toggle-btn" class="text-blue-600 text-sm font-bold hover:underline">
+                    New User? Create an Account
+                </button>
+            </div>
+            
+            <p id="auth-error" class="text-red-600 text-xs mt-4 hidden bg-red-50 p-3 rounded border border-red-200 font-bold"></p>
+            <p id="auth-success" class="text-green-600 text-xs mt-4 hidden bg-green-50 p-3 rounded border border-green-200 font-bold"></p>
         </div>
     </div>
 
-    <div id="dashboard-content" class="max-w-6xl mx-auto opacity-0 transition-opacity duration-500">
+    <div id="dashboard-content" class="max-w-6xl mx-auto opacity-0 pointer-events-none transition-all duration-1000 transform translate-y-4">
         <div class="flex justify-between items-center mb-8">
-            <h1 class="text-3xl font-bold text-gray-800">Phase 2 Command Center</h1>
-            <div class="space-x-4">
-                <button onclick="logout()" class="text-gray-500 text-sm underline">Logout</button>
-                <button onclick="refreshAll()" class="bg-blue-600 text-white px-4 py-2 rounded shadow hover:bg-blue-700">Refresh All</button>
-                <button onclick="exportCSV()" class="bg-green-600 text-white px-4 py-2 rounded shadow hover:bg-green-700">Export Orders</button>
+            <h1 class="text-4xl font-black text-gray-900 tracking-tighter">Phase 2 Command <span class="text-blue-600">Center</span></h1>
+            <div class="flex items-center gap-4">
+                <div class="text-right">
+                    <p class="text-[10px] text-gray-400 font-bold uppercase">Active Session</p>
+                    <p id="user-display" class="text-sm font-bold text-gray-700"></p>
+                </div>
+                <button onclick="logout()" class="bg-gray-200 hover:bg-red-100 hover:text-red-600 px-4 py-2 rounded-lg text-xs font-bold transition-all">Logout</button>
             </div>
         </div>
 
-        <div class="bg-white p-6 rounded-lg shadow-md mb-8">
+        <div class="bg-white p-6 rounded-2xl shadow-sm border border-gray-200 mb-8">
             <h2 class="text-xl font-bold text-gray-700 mb-1">PokeAPI Live Lookup</h2>
-            <div class="flex gap-4 mt-4">
-                <input id="poke-input" type="text" placeholder="Enter Pokemon Name..." class="border p-2 rounded-lg flex-grow">
-                <button onclick="searchPokemon('direct')" class="bg-purple-600 text-white px-6 py-2 rounded-lg shadow hover:bg-purple-700">Direct Search</button>
-                <button onclick="searchPokemon('secure')" class="bg-yellow-500 text-white px-6 py-2 rounded-lg shadow hover:bg-yellow-600">🔁 Secure Search</button>
+            <p class="text-sm text-gray-500 mb-4">
+                <span class="inline-block bg-purple-100 text-purple-700 px-2 py-0.5 rounded text-xs font-semibold mr-2">Direct</span> calls Lambda directly.
+                <span class="inline-block bg-yellow-100 text-yellow-700 px-2 py-0.5 rounded text-xs font-semibold mr-2">Secure (Step Function)</span> calls via Step Function with retry logic.
+            </p>
+            <div class="flex gap-4">
+                <input id="poke-input" type="text" placeholder="Enter Pokemon Name..." class="border-2 p-2 rounded-lg flex-grow outline-none focus:border-blue-500">
+                <button onclick="searchPokemon('direct')" class="bg-purple-600 text-white px-6 py-2 rounded-lg shadow hover:bg-purple-700">
+                    Direct Search
+                </button>
+                <button onclick="searchPokemon('secure')" class="bg-yellow-500 text-white px-6 py-2 rounded-lg shadow hover:bg-yellow-600">
+                    🔁 Secure Search
+                </button>
             </div>
             <div id="poke-result" class="mt-4 p-4 border rounded-lg bg-purple-50 hidden"></div>
-            <div id="poke-mode" class="mt-2 text-xs text-gray-400 hidden"></div>
+            <div id="poke-mode" class="mt-2 text-[10px] text-gray-400 font-mono hidden uppercase tracking-widest"></div>
         </div>
-
-        <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
-            <div class="bg-white shadow-md rounded-lg overflow-hidden">
-                <div class="bg-gray-100 px-5 py-3 border-b"><h2 class="font-bold text-gray-700 uppercase">Product Inventory</h2></div>
-                <table class="min-w-full leading-normal"><tbody id="product-body"></tbody></table>
-            </div>
-            <div class="bg-white shadow-md rounded-lg overflow-hidden">
-                <div class="bg-gray-100 px-5 py-3 border-b"><h2 class="font-bold text-gray-700 uppercase">Recent Orders</h2></div>
-                <table class="min-w-full leading-normal"><tbody id="order-body"></tbody></table>
-            </div>
+        
+        <div class="bg-white p-8 rounded-2xl shadow-sm border border-gray-200 mb-8">
+             <h2 class="font-bold text-lg mb-4 text-gray-800">System Monitoring</h2>
+             <button onclick="refreshAll()" class="bg-blue-600 text-white px-6 py-2 rounded-lg font-bold hover:bg-blue-700 shadow-md">Refresh Data</button>
+             <div class="grid grid-cols-1 lg:grid-cols-2 gap-8 mt-6">
+                 <div class="bg-gray-50 p-6 rounded-xl border border-gray-100">
+                    <h3 class="text-xs font-black text-gray-400 mb-4 uppercase tracking-widest">Inventory</h3>
+                    <div id="product-body" class="space-y-3"></div>
+                 </div>
+                 <div class="bg-gray-50 p-6 rounded-xl border border-gray-100">
+                    <h3 class="text-xs font-black text-gray-400 mb-4 uppercase tracking-widest">Recent Orders</h3>
+                    <div id="order-body" class="space-y-3"></div>
+                 </div>
+             </div>
         </div>
     </div>
 
     <script>
         const API_BASE = window.location.href.split('/dashboard')[0];
         const CLIENT_ID = '71gvv4tb0i7vcr0glu79fsra1v';
+        let authMode = 'LOGIN'; 
         let ID_TOKEN = localStorage.getItem('id_token');
 
-        // --- AUTH LOGIC ---
-        async function handleLogin() {
-            const email = document.getElementById('login-email').value;
-            const password = document.getElementById('login-password').value;
-            const errorEl = document.getElementById('login-error');
+        // --- AUTH UI LOGIC ---
+        function toggleAuthMode() {
+            const btn = document.getElementById('toggle-btn');
+            if (authMode === 'LOGIN') {
+                authMode = 'SIGNUP';
+                document.getElementById('modal-title').innerText = 'Join System';
+                document.getElementById('submit-btn').innerText = 'Create Account';
+                btn.innerText = 'Already have an account? Sign In';
+            } else {
+                authMode = 'LOGIN';
+                document.getElementById('modal-title').innerText = 'Access Portal';
+                document.getElementById('submit-btn').innerText = 'Sign In';
+                btn.innerText = 'New User? Create an Account';
+                document.getElementById('confirm-box').classList.add('hidden');
+            }
+        }
+
+        async function handleSubmit() {
+            const email = document.getElementById('auth-email').value;
+            const password = document.getElementById('auth-password').value;
+            const code = document.getElementById('auth-code').value;
+            const errorEl = document.getElementById('auth-error');
+            const successEl = document.getElementById('auth-success');
+
+            errorEl.classList.add('hidden');
+            successEl.classList.add('hidden');
 
             try {
+                let target, body;
+                if (authMode === 'LOGIN') {
+                    target = 'InitiateAuth';
+                    body = { ClientId: CLIENT_ID, AuthFlow: "USER_PASSWORD_AUTH", AuthParameters: { USERNAME: email, PASSWORD: password }};
+                } else if (authMode === 'SIGNUP') {
+                    target = 'SignUp';
+                    body = { ClientId: CLIENT_ID, Username: email, Password: password, UserAttributes: [{ Name: "email", Value: email }]};
+                } else if (authMode === 'CONFIRM') {
+                    target = 'ConfirmSignUp';
+                    body = { ClientId: CLIENT_ID, Username: email, ConfirmationCode: code };
+                }
+
                 const res = await fetch('https://cognito-idp.ap-southeast-1.amazonaws.com/', {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/x-amz-json-1.1',
-                        'X-Amz-Target': 'AWSCognitoIdentityProviderService.InitiateAuth'
-                    },
-                    body: JSON.stringify({
-                        ClientId: CLIENT_ID,
-                        AuthFlow: "USER_PASSWORD_AUTH",
-                        AuthParameters: { USERNAME: email, PASSWORD: password }
-                    })
+                    headers: { 'Content-Type': 'application/x-amz-json-1.1', 'X-Amz-Target': `AWSCognitoIdentityProviderService.${target}` },
+                    body: JSON.stringify(body)
                 });
 
                 const data = await res.json();
-                if (data.AuthenticationResult) {
+                if (!res.ok) throw new Error(data.message || "Action Failed");
+
+                if (authMode === 'LOGIN') {
                     ID_TOKEN = data.AuthenticationResult.IdToken;
                     localStorage.setItem('id_token', ID_TOKEN);
+                    localStorage.setItem('user_email', email);
                     showDashboard();
-                } else {
-                    throw new Error(data.message || "Login Failed");
+                } else if (authMode === 'SIGNUP') {
+                    authMode = 'CONFIRM';
+                    document.getElementById('modal-title').innerText = 'Verify Email';
+                    document.getElementById('confirm-box').classList.remove('hidden');
+                    document.getElementById('submit-btn').innerText = 'Verify & Activate';
+                    successEl.innerText = "Code sent! Check your email.";
+                    successEl.classList.remove('hidden');
+                } else if (authMode === 'CONFIRM') {
+                    successEl.innerText = "Success! Please Sign In.";
+                    successEl.classList.remove('hidden');
+                    setTimeout(() => toggleAuthMode(), 2000);
                 }
             } catch (err) {
                 errorEl.innerText = err.message;
@@ -94,52 +166,59 @@
         function showDashboard() {
             document.getElementById('login-modal').classList.add('hidden');
             const content = document.getElementById('dashboard-content');
-            content.classList.remove('opacity-0');
+            content.classList.remove('opacity-0', 'pointer-events-none');
             content.classList.add('opacity-100');
+            document.getElementById('user-display').innerText = localStorage.getItem('user_email');
             refreshAll();
         }
 
-        function logout() {
-            localStorage.clear();
-            window.location.reload();
-        }
+        function logout() { localStorage.clear(); window.location.reload(); }
 
         // --- AUTHORIZED FETCH WRAPPER ---
         async function authFetch(url, options = {}) {
-            const headers = { ...options.headers, 'Authorization': ID_TOKEN };
-            const res = await fetch(url, { ...options, headers });
+            const res = await fetch(url, { ...options, headers: { ...options.headers, 'Authorization': ID_TOKEN } });
             if (res.status === 401) logout();
             return res;
         }
 
-        // --- UPDATED FETCHERS ---
+        // --- DATA LOADERS ---
         async function fetchProducts() {
-            const res = await fetch(`${API_BASE}/products`); // Public
+            const res = await fetch(`${API_BASE}/products`);
             const result = await res.json();
             document.getElementById('product-body').innerHTML = (result.data || []).map(p => `
-                <tr><td class="px-5 py-4 border-b capitalize font-bold">${p.name}</td><td class="px-5 py-4 border-b text-green-600 font-bold">$${p.price}</td></tr>
-            `).join('');
+                <div class="p-3 bg-white rounded-lg border flex justify-between items-center shadow-sm">
+                    <span class="font-bold text-gray-700 capitalize">${p.name}</span>
+                    <span class="text-blue-600 font-black text-sm">$${p.price}</span>
+                </div>`).join('');
         }
 
         async function fetchOrders() {
-            const res = await authFetch(`${API_BASE}/orders`); // PRIVATE
+            const res = await authFetch(`${API_BASE}/orders`);
             const result = await res.json();
             document.getElementById('order-body').innerHTML = (result.data || []).map(o => `
-                <tr><td class="px-5 py-4 border-b text-gray-500">${o.orderId.substring(0,8)}...</td><td class="px-5 py-4 border-b font-bold">$${o.totalPrice}</td></tr>
-            `).join('');
+                <div class="p-3 bg-white rounded-lg border flex justify-between items-center shadow-sm">
+                    <span class="text-xs font-mono text-gray-400">#${o.orderId.substring(0,5)}</span>
+                    <span class="font-black text-gray-800 text-sm">$${o.totalPrice}</span>
+                </div>`).join('');
         }
 
-        async function searchPokemon(mode = 'direct') {
+        // --- POKEMON SEARCH LOGIC ---
+        async function searchPokemon(mode) {
             const name = document.getElementById('poke-input').value.trim().toLowerCase() || 'pikachu';
             const display = document.getElementById('poke-result');
+            const modeEl = document.getElementById('poke-mode');
+
             display.classList.remove('hidden');
-            display.innerHTML = "Searching...";
+            modeEl.classList.remove('hidden');
+            display.innerHTML = `<span class="animate-pulse">Accessing PokeAPI for <strong>${name}</strong>...</span>`;
 
             try {
                 let res;
                 if (mode === 'direct') {
+                    modeEl.innerHTML = '🔵 Connection: <strong>Direct Lambda</strong>';
                     res = await fetch(`${API_BASE}/pokemon?name=${name}`);
                 } else {
+                    modeEl.innerHTML = '🟡 Connection: <strong>Step Function (Secure)</strong>';
                     res = await authFetch(`${API_BASE}/pokemon-secure`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
@@ -147,17 +226,17 @@
                     });
                 }
                 const result = await res.json();
-                const data = mode === 'direct' ? result.data : (typeof result === 'string' ? JSON.parse(result).data : result.data);
-                display.innerHTML = `<strong>${data.name}</strong> <img src="${data.sprite}" class="inline w-12">`;
-            } catch (err) { display.innerHTML = "Error!"; }
+                const p = mode === 'direct' ? result.data : (typeof result === 'string' ? JSON.parse(result).data : result.data);
+                
+                display.className = `mt-4 p-4 border rounded-xl flex items-center gap-4 ${mode === 'direct' ? 'bg-purple-50 border-purple-100' : 'bg-yellow-50 border-yellow-100'}`;
+                display.innerHTML = `<img src="${p.sprite}" class="w-16"><div><h3 class="font-bold capitalize">${p.name}</h3><p class="text-[10px] text-gray-400">ID: #${p.id}</p></div>`;
+            } catch (err) {
+                display.innerHTML = `<span class="text-red-500">Error: System could not locate specimen.</span>`;
+            }
         }
 
         function refreshAll() { fetchProducts(); fetchOrders(); }
-
-        // AUTO-LOGIN CHECK
-        if (ID_TOKEN) {
-            showDashboard();
-        }
+        if (ID_TOKEN) showDashboard();
     </script>
 </body>
 </html>
