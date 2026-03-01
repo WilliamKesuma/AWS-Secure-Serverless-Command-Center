@@ -11,7 +11,6 @@ class ReportingStack(Stack):
                  order_table, report_bucket, utils_layer, **kwargs) -> None:
         super().__init__(scope, construct_id, **kwargs)
 
-        # Unified Function: Scan + Upload + Email
         report_fn = _lambda.Function(
             self, "OrderReportFunction",
             runtime=_lambda.Runtime.PYTHON_3_12,

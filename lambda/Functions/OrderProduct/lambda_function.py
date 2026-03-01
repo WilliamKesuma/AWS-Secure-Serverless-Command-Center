@@ -27,7 +27,9 @@ BUCKET_NAME = os.environ.get("BUCKET_NAME")
 @tracer.capture_lambda_handler
 def lambda_handler(event, context):
     try:
-        method = event.get("httpMethod")
+        # Some tests invoke handler with just an event containing body (no httpMethod).
+        # Default to POST when body is present to maintain backward compatibility.
+        method = event.get("httpMethod") or ("POST" if event.get("body") else None)
         path = event.get("path")
 
         if method == "GET" and path == "/orders":
@@ -56,8 +58,7 @@ def lambda_handler(event, context):
                 Body=output.getvalue(),
                 ContentType='text/csv'
             )
-
-            # Generate URL with explicit download headers to fix 403/browser issues
+            
             url = s3_client.generate_presigned_url(
                 'get_object',
                 Params={
@@ -71,7 +72,6 @@ def lambda_handler(event, context):
             return create_response(200, "Export successful", {"downloadUrl": url})
 
         if method == "POST":
-            # ... (Rest of your existing POST logic)
             body_str = event.get("body") or "{}"
             if event.get("isBase64Encoded") and body_str:
                 body_str = base64.b64decode(body_str).decode("utf-8")
@@ -80,6 +80,10 @@ def lambda_handler(event, context):
             user_id = body.get("userId")
             product_id = body.get("productId")
             quantity = int(body.get("quantity", 1))
+
+            # Validate quantity
+            if quantity <= 0:
+                return create_response(400, "Invalid quantity")
 
             product = get_product(product_id)
             if not product:

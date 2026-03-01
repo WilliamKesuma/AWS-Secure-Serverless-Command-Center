@@ -21,7 +21,7 @@ class LambdaStack(Stack):
                  report_bucket,
                  order_queue_url: str,
                  order_queue,
-                 user_pool,  # Passed from CognitoStack via app.py
+                 user_pool,
                  **kwargs):
 
         super().__init__(scope, construct_id, **kwargs)

@@ -11,7 +11,6 @@ class OpenSearchStack(Stack):
     def __init__(self, scope: Construct, construct_id: str, lambda_role_arn: str, **kwargs) -> None:
         super().__init__(scope, construct_id, **kwargs)
 
-        # Import the Lambda role using its ARN
         role_to_grant = iam.Role.from_role_arn(self, "ImportedLambdaRole", lambda_role_arn)
 
         self.os_domain = opensearch.Domain(
@@ -22,7 +21,6 @@ class OpenSearchStack(Stack):
                 data_nodes=1,
                 multi_az_with_standby_enabled=False
             ),
-            # No fine-grained access control - allows SSO role to access Dashboard directly
             encryption_at_rest=opensearch.EncryptionAtRestOptions(enabled=True),
             node_to_node_encryption=True,
             enforce_https=True,
@@ -46,7 +44,6 @@ class OpenSearchStack(Stack):
             removal_policy=RemovalPolicy.DESTROY
         )
 
-        # Grant read/write to Lambda role
         self.os_domain.grant_read_write(role_to_grant)
 
     @property

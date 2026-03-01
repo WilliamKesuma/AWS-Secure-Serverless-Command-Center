@@ -21,5 +21,4 @@ class S3Stack(Stack):
             )]
         )
 
-        # Force a state update to clear the console error
         Tags.of(self).add("StackStatus", "ResettingConsoleView")

@@ -11,7 +11,6 @@ class SqsStack(Stack):
         super().__init__(scope, construct_id, **kwargs)
 
         # FIFO Queue - productId as MessageGroupId ensures
-        # orders for the same product are processed in order
         self.order_queue = sqs.Queue(
             self, "OrderQueue",
             queue_name="OrderQueue.fifo",

@@ -33,9 +33,6 @@ class SnsStack(Stack):
         error_topic.add_subscription(subs.EmailSubscription("mt-williamkesuma@axrail.com"))
 
         # 3. Metric Filter per Lambda function log group.
-        #    Powertools logs message as a nested JSON object:
-        #    {"message": {"message": "Unhandled Exception occurred", ...}}
-        #    So we match on $.message.message instead of $.message
         for i, fn in enumerate(lambda_functions):
             log_group = logs.LogGroup.from_log_group_name(
                 self,
