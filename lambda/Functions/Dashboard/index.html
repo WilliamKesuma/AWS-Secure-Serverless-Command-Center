@@ -17,12 +17,26 @@
         </div>
 
         <div class="bg-white p-6 rounded-lg shadow-md mb-8">
-            <h2 class="text-xl font-bold text-gray-700 mb-4">PokeAPI Live Lookup</h2>
+            <h2 class="text-xl font-bold text-gray-700 mb-1">PokeAPI Live Lookup</h2>
+            <p class="text-sm text-gray-500 mb-4">
+                <span class="inline-block bg-purple-100 text-purple-700 px-2 py-0.5 rounded text-xs font-semibold mr-2">Direct</span> calls Lambda directly.
+                <span class="inline-block bg-yellow-100 text-yellow-700 px-2 py-0.5 rounded text-xs font-semibold mr-2">Secure (Step Function)</span> calls via Step Function with 5x retry on server failure.
+            </p>
             <div class="flex gap-4">
                 <input id="poke-input" type="text" placeholder="Enter Pokemon Name..." class="border p-2 rounded-lg flex-grow">
-                <button onclick="searchPokemon()" class="bg-purple-600 text-white px-6 py-2 rounded-lg shadow hover:bg-purple-700">Search</button>
+                <button onclick="searchPokemon('direct')" class="bg-purple-600 text-white px-6 py-2 rounded-lg shadow hover:bg-purple-700">
+                    Direct Search
+                </button>
+                <button onclick="searchPokemon('secure')" class="bg-yellow-500 text-white px-6 py-2 rounded-lg shadow hover:bg-yellow-600">
+                    🔁 Secure Search
+                </button>
             </div>
+
+            <!-- Result display -->
             <div id="poke-result" class="mt-4 p-4 border rounded-lg bg-purple-50 hidden"></div>
+
+            <!-- Mode indicator -->
+            <div id="poke-mode" class="mt-2 text-xs text-gray-400 hidden"></div>
         </div>
 
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
@@ -95,19 +109,59 @@
             `).join('');
         }
 
-        async function searchPokemon() {
-            const name = document.getElementById('poke-input').value.trim().toLowerCase();
+        async function searchPokemon(mode = 'direct') {
+            const name = document.getElementById('poke-input').value.trim().toLowerCase() || 'pikachu';
             const display = document.getElementById('poke-result');
+            const modeEl = document.getElementById('poke-mode');
+
             display.classList.remove('hidden');
-            display.innerHTML = "Searching...";
-            const res = await fetch(`${API_BASE}/pokemon?name=${name}`);
-            const result = await res.json();
-            if (res.status === 200) {
-                const p = result.data;
-                display.innerHTML = `<div class="flex items-center gap-4"><img src="${p.sprite}" class="w-16 h-16"><h3 class="text-xl font-bold capitalize">${p.name} (#${p.id})</h3></div>`;
-            } else {
-                display.innerHTML = "Not found.";
+            modeEl.classList.remove('hidden');
+            display.innerHTML = `<span class="animate-pulse">Searching for <strong>${name}</strong>...</span>`;
+
+            try {
+                let res, result;
+
+                if (mode === 'direct') {
+                    // Direct Lambda call
+                    modeEl.innerHTML = '🟣 Mode: <strong>Direct Lambda</strong> — no retry mechanism';
+                    res = await fetch(`${API_BASE}/pokemon?name=${name}`);
+                    result = await res.json();
+                    renderPokemon(result.data, display, 'purple');
+                } else {
+                    // Step Function call with retry
+                    modeEl.innerHTML = '🟡 Mode: <strong>Step Function (Secure)</strong> — retries up to 5x on server failure';
+                    res = await fetch(`${API_BASE}/pokemon-secure`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ name })
+                    });
+                    const raw = await res.json();
+                    // Response comes nested from Step Function output
+                    const data = raw.data || (typeof raw === 'string' ? JSON.parse(raw).data : raw);
+                    renderPokemon(data, display, 'yellow');
+                }
+            } catch (err) {
+                display.innerHTML = `<span class="text-red-500">Error: ${err.message}</span>`;
             }
+        }
+
+        function renderPokemon(p, display, color) {
+            if (!p) {
+                display.innerHTML = '<span class="text-red-500">Pokemon not found or server error.</span>';
+                return;
+            }
+            const bg = color === 'yellow' ? 'bg-yellow-50 border-yellow-200' : 'bg-purple-50 border-purple-200';
+            display.className = `mt-4 p-4 border rounded-lg ${bg}`;
+            display.innerHTML = `
+                <div class="flex items-center gap-4">
+                    <img src="${p.sprite}" class="w-20 h-20">
+                    <div>
+                        <h3 class="text-xl font-bold capitalize">${p.name} <span class="text-gray-400">#${p.id}</span></h3>
+                        <p class="text-sm text-gray-500">Types: <strong>${p.types?.join(', ')}</strong></p>
+                        <p class="text-sm text-gray-500">Height: ${p.height} | Weight: ${p.weight}</p>
+                    </div>
+                </div>
+            `;
         }
 
         function refreshAll() {

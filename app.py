@@ -1,36 +1,22 @@
-#!/usr/bin/env python3
 import aws_cdk as cdk
-import os
 from stack_cdk.dynamodb_stack import DynamodbStack
 from stack_cdk.iam_stack import IamStack
 from stack_cdk.lambda_stack import LambdaStack
+from stack_cdk.sns_stack import SnsStack
+from stack_cdk.opensearch_stack import OpenSearchStack
 from stack_cdk.s3_stack import S3Stack
 from stack_cdk.sqs_stack import SqsStack
 from stack_cdk.reporting_stack import ReportingStack
-from stack_cdk.opensearch_stack import OpenSearchStack
 
 app = cdk.App()
 
-env_ap = cdk.Environment(
-    account=os.getenv('CDK_DEFAULT_ACCOUNT'), 
-    region='ap-southeast-1'
-)
+iam_stack = IamStack(app, "IamStack")
+db_stack = DynamodbStack(app, "DynamodbStack")
+s3_stack = S3Stack(app, "S3Stack")
+sqs_stack = SqsStack(app, "SqsStack")
+os_stack = OpenSearchStack(app, "OpenSearchStack",
+    lambda_role_arn=iam_stack.lambda_role.role_arn)
 
-# 1. Identity & Data Layers
-iam_stack = IamStack(app, "IamStack", env=env_ap)
-db_stack = DynamodbStack(app, "DynamodbStack", env=env_ap)
-s3_stack = S3Stack(app, "S3Stack", env=env_ap)
-sqs_stack = SqsStack(app, "SqsStack", env=env_ap)
-
-# 2. Search Layer
-os_stack = OpenSearchStack(
-    app, "OpenSearchStack",
-    lambda_role_arn=iam_stack.lambda_role.role_arn,
-    env=env_ap
-)
-
-# 3. Main Compute Layer (CRUD API)
-# Added 'report_bucket' to pass the bucket object for permissions
 lambda_stack = LambdaStack(
     app, "LambdaStack",
     user_table=db_stack.user_table,
@@ -39,18 +25,41 @@ lambda_stack = LambdaStack(
     iam_role=iam_stack.lambda_role,
     os_endpoint=os_stack.domain_endpoint,
     bucket_name=s3_stack.bucket.bucket_name,
-    report_bucket=s3_stack.bucket, # <--- NEW: Pass the bucket construct
+    report_bucket=s3_stack.bucket,
     order_queue_url=sqs_stack.order_queue.queue_url,
-    order_queue=sqs_stack.order_queue,
-    env=env_ap
+    order_queue=sqs_stack.order_queue
 )
 
-# 4. Final Reporting Layer (Daily Batch job)
-ReportingStack(app, "ReportingStack",
+reporting_stack = ReportingStack(
+    app, "ReportingStack",
     order_table=db_stack.order_table,
     report_bucket=s3_stack.bucket,
-    utils_layer=lambda_stack.utils_layer,
-    env=env_ap
+    utils_layer=lambda_stack.utils_layer
+)
+
+SnsStack(app, "SnsStack",
+    lambda_functions=[
+        lambda_stack.main_fn,
+        lambda_stack.get_users_fn,
+        lambda_stack.get_user_by_id_fn,
+        lambda_stack.update_user_fn,
+        lambda_stack.delete_user_fn,
+        lambda_stack.create_product_fn,
+        lambda_stack.get_product_fn,
+        lambda_stack.get_product_by_id_fn,
+        lambda_stack.update_product_fn,
+        lambda_stack.delete_product_fn,
+        lambda_stack.search_user_fn,
+        lambda_stack.search_product_fn,
+        lambda_stack.stream_fn,
+        lambda_stack.user_upload_url_fn,
+        lambda_stack.user_download_url_fn,
+        lambda_stack.product_upload_url_fn,
+        lambda_stack.product_download_url_fn,
+        lambda_stack.order_product_fn,
+        lambda_stack.order_processing_fn,
+        lambda_stack.pokemon_fn,
+    ]
 )
 
 app.synth()
